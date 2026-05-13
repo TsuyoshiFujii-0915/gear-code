@@ -5,7 +5,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from gear_code.config import ToolConfig
 from gear_code.errors import GearError
+from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
 from gear_code.tools.registry import ToolRegistry
 from gear_code.tools.runtimes import DockerShellRuntime, ShellRuntime
@@ -111,6 +113,21 @@ class ToolTests(unittest.TestCase):
         self.assertIsInstance(write_properties, dict)
         self.assertIn("relative", str(read_properties["path"]["description"]))
         self.assertIn("relative", str(write_properties["path"]["description"]))
+
+    def test_build_configured_tools_exposes_only_enabled_tool_schemas(self) -> None:
+        runtime = FakeShellRuntime()
+        workspace = Path.cwd()
+        tool_config = ToolConfig(
+            shell_tool=False,
+            file_read=True,
+            file_write=False,
+            apply_patch=True,
+        )
+
+        registry = ToolRegistry(build_configured_tools(tool_config, workspace, runtime))
+
+        schema_names = [schema["name"] for schema in registry.schemas()]
+        self.assertEqual(schema_names, ["file_read", "apply_patch"])
 
     def test_apply_patch_rejects_parent_directory_target(self) -> None:
         from gear_code.tools.patch import ApplyPatchTool

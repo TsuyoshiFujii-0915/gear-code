@@ -26,6 +26,12 @@ class ConfigTests(unittest.TestCase):
                         "max_iterations = 8",
                         "model_timeout_seconds = 120",
                         "",
+                        "[tool]",
+                        "shell_tool = true",
+                        "file_read = true",
+                        "file_write = true",
+                        "apply_patch = true",
+                        "",
                     ]
                 ),
                 encoding="utf-8",
@@ -42,6 +48,10 @@ class ConfigTests(unittest.TestCase):
             self.assertFalse(config.runtime.network_enabled)
             self.assertEqual(config.runtime.max_iterations, 8)
             self.assertEqual(config.runtime.model_timeout_seconds, 120)
+            self.assertTrue(config.tool.shell_tool)
+            self.assertTrue(config.tool.file_read)
+            self.assertTrue(config.tool.file_write)
+            self.assertTrue(config.tool.apply_patch)
 
     def test_omits_authorization_when_api_key_env_is_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -61,6 +71,12 @@ class ConfigTests(unittest.TestCase):
                         "max_iterations = 8",
                         "model_timeout_seconds = 120",
                         "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = true",
+                        "file_write = false",
+                        "apply_patch = true",
+                        "",
                     ]
                 ),
                 encoding="utf-8",
@@ -69,6 +85,10 @@ class ConfigTests(unittest.TestCase):
             config = load_config(config_path, os.environ)
 
             self.assertIsNone(config.model.api_key)
+            self.assertFalse(config.tool.shell_tool)
+            self.assertTrue(config.tool.file_read)
+            self.assertFalse(config.tool.file_write)
+            self.assertTrue(config.tool.apply_patch)
 
     def test_fails_when_named_api_key_environment_variable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -87,6 +107,12 @@ class ConfigTests(unittest.TestCase):
                         'network = "disabled"',
                         "max_iterations = 8",
                         "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = true",
+                        "file_read = true",
+                        "file_write = true",
+                        "apply_patch = true",
                         "",
                     ]
                 ),
@@ -117,6 +143,12 @@ class ConfigTests(unittest.TestCase):
                         "max_iterations = 8",
                         "model_timeout_seconds = 120",
                         "",
+                        "[tool]",
+                        "shell_tool = true",
+                        "file_read = true",
+                        "file_write = true",
+                        "apply_patch = true",
+                        "",
                     ]
                 ),
                 encoding="utf-8",
@@ -127,6 +159,106 @@ class ConfigTests(unittest.TestCase):
 
             self.assertEqual(error.exception.origin, "config")
             self.assertIn("runtime.network", error.exception.message)
+
+    def test_fails_when_tool_table_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, os.environ)
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("[tool]", error.exception.message)
+
+    def test_fails_when_tool_value_is_not_boolean(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        'shell_tool = "enabled"',
+                        "file_read = true",
+                        "file_write = true",
+                        "apply_patch = true",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, os.environ)
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("tool.shell_tool", error.exception.message)
+
+    def test_fails_when_tool_key_is_unknown(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = true",
+                        "file_read = true",
+                        "file_write = true",
+                        "apply_patch = true",
+                        "browser = true",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, os.environ)
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("tool.browser", error.exception.message)
 
     def test_discovers_project_config_before_user_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -173,7 +305,10 @@ class ConfigTests(unittest.TestCase):
             path = initialize_config("project", root, root / "home")
 
             self.assertEqual(path, root / ".gear" / "config.toml")
-            self.assertIn("[model]", path.read_text(encoding="utf-8"))
+            config_text = path.read_text(encoding="utf-8")
+            self.assertIn("[model]", config_text)
+            self.assertIn("[tool]", config_text)
+            self.assertLess(config_text.index("[tool]"), config_text.index("[runtime]"))
 
     def test_initializes_user_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -182,7 +317,10 @@ class ConfigTests(unittest.TestCase):
             path = initialize_config("user", root, root / "home")
 
             self.assertEqual(path, root / "home" / ".gear" / "config.toml")
-            self.assertIn("[runtime]", path.read_text(encoding="utf-8"))
+            config_text = path.read_text(encoding="utf-8")
+            self.assertIn("[runtime]", config_text)
+            self.assertIn("shell_tool = true", config_text)
+            self.assertLess(config_text.index("[tool]"), config_text.index("[runtime]"))
 
     def test_initialize_fails_when_config_already_exists(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

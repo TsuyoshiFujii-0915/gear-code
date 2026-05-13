@@ -15,6 +15,12 @@ url = "http://localhost:1234/v1/responses"
 model = "local-model-id"
 api_key_env = ""
 
+[tool]
+shell_tool = true
+file_read = true
+file_write = true
+apply_patch = true
+
 [runtime]
 workdir = "."
 session_dir = ".gear/sessions"
@@ -40,16 +46,20 @@ class ModelConfig:
 
 
 @dataclass(frozen=True)
-class AppConfig:
-    """Top-level Gear Code configuration.
+class ToolConfig:
+    """Model-callable tool configuration.
 
     Attributes:
-        model: Model endpoint configuration.
-        runtime: Runtime configuration.
+        shell_tool: Whether to expose the shell execution tool.
+        file_read: Whether to expose the file read tool.
+        file_write: Whether to expose the file write tool.
+        apply_patch: Whether to expose the patch application tool.
     """
 
-    model: ModelConfig
-    runtime: RuntimeConfig
+    shell_tool: bool
+    file_read: bool
+    file_write: bool
+    apply_patch: bool
 
 
 @dataclass(frozen=True)
@@ -69,6 +79,21 @@ class RuntimeConfig:
     network_enabled: bool
     max_iterations: int
     model_timeout_seconds: int
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    """Top-level Gear Code configuration.
+
+    Attributes:
+        model: Model endpoint configuration.
+        runtime: Runtime configuration.
+        tool: Model-callable tool configuration.
+    """
+
+    model: ModelConfig
+    runtime: RuntimeConfig
+    tool: ToolConfig
 
 
 def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
@@ -121,7 +146,19 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
             "runtime",
         ),
     )
-    return AppConfig(ModelConfig(url=url, model=model, api_key=api_key), runtime)
+    tool_table = _required_table(raw_data, "tool")
+    _reject_unknown_keys(
+        tool_table,
+        "tool",
+        {"shell_tool", "file_read", "file_write", "apply_patch"},
+    )
+    tool = ToolConfig(
+        shell_tool=_required_bool(tool_table, "shell_tool", "tool"),
+        file_read=_required_bool(tool_table, "file_read", "tool"),
+        file_write=_required_bool(tool_table, "file_write", "tool"),
+        apply_patch=_required_bool(tool_table, "apply_patch", "tool"),
+    )
+    return AppConfig(ModelConfig(url=url, model=model, api_key=api_key), runtime, tool)
 
 
 def discover_config_path(start_dir: Path, home_dir: Path) -> Path:
@@ -307,3 +344,32 @@ def _required_positive_int(data: dict[str, object], key: str, table_name: str) -
             {"table": table_name, "key": key},
         )
     return value
+
+
+def _required_bool(data: dict[str, object], key: str, table_name: str) -> bool:
+    value = data.get(key)
+    if not isinstance(value, bool):
+        raise gear_error(
+            "config_value_invalid",
+            f"Missing or invalid boolean value: {table_name}.{key}",
+            "config",
+            True,
+            {"table": table_name, "key": key},
+        )
+    return value
+
+
+def _reject_unknown_keys(
+    data: dict[str, object],
+    table_name: str,
+    expected_keys: set[str],
+) -> None:
+    for key in data:
+        if key not in expected_keys:
+            raise gear_error(
+                "config_value_invalid",
+                f"Unknown config value: {table_name}.{key}",
+                "config",
+                True,
+                {"table": table_name, "key": key},
+            )

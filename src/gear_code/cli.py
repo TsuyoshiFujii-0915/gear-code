@@ -20,10 +20,8 @@ from gear_code.errors import GearError
 from gear_code.model.client import ModelClient
 from gear_code.model.transport import UrllibHttpTransport
 from gear_code.store.jsonl import JsonlContextStore
-from gear_code.tools.filesystem import FileReadTool, FileWriteTool
-from gear_code.tools.patch import ApplyPatchTool
+from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.runtimes import DockerShellRuntime
-from gear_code.tools.shell import ShellTool
 
 
 def main() -> None:
@@ -97,12 +95,7 @@ def _run_tui(args: Namespace, environment: Mapping[str, str]) -> None:
     workspace = runtime.workdir.resolve()
     session_id = str(uuid4())
     shell_runtime = DockerShellRuntime(workspace, DEFAULT_DOCKER_IMAGE, runtime.network_enabled)
-    tools = [
-        ShellTool(workspace, shell_runtime),
-        FileReadTool(workspace),
-        FileWriteTool(workspace),
-        ApplyPatchTool(workspace),
-    ]
+    tools = build_configured_tools(config.tool, workspace, shell_runtime)
     store = JsonlContextStore(runtime.session_dir)
     loop = AgentLoop(
         ModelClient(UrllibHttpTransport()),
