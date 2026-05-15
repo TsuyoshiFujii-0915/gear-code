@@ -7,8 +7,10 @@ from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.message import Message
 from textual.widgets import Input, RichLog, Rule, Static
 
+from gear_code.agent.events import AgentLoopEvent
 from gear_code.agent.compaction import CompactionService
 from gear_code.agent.loop import AgentLoop
 from gear_code.config import ModelConfig, RuntimeConfig
@@ -19,6 +21,7 @@ from gear_code.tui import (
     collect_token_usage,
     compact_path,
     compact_session,
+    format_progress_event,
     format_tokens,
 )
 
@@ -30,6 +33,7 @@ _ASST = "#7dd3fc"
 _META = "#4b5675"
 _RULE = "#1c1c28"
 _DIM = "#2d3657"
+_ERROR = "#f87171"
 
 _CSS = f"""
 Screen {{
@@ -90,6 +94,14 @@ Input:focus {{
     border: none;
 }}
 """
+
+
+class AgentProgress(Message):
+    """Textual message carrying an agent loop progress event."""
+
+    def __init__(self, event: AgentLoopEvent) -> None:
+        super().__init__()
+        self.event = event
 
 
 class GearApp(App[None]):
@@ -166,8 +178,9 @@ class GearApp(App[None]):
                 self._runtime.max_iterations,
                 self._runtime.model_timeout_seconds,
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            self._store.append(self._session_id, "turn_error", {"text": str(exc)})
+            self.call_from_thread(self._write_error, str(exc))
         self._finish_work()
 
     @work(thread=True)
@@ -202,10 +215,29 @@ class GearApp(App[None]):
         if line.speaker == "you":
             chat.write(f"[bold {_USER}]you[/bold {_USER}]")
             chat.write(line.text)
-        else:
+        if line.speaker == "assistant":
             chat.write(f"[bold {_ASST}]assistant[/bold {_ASST}]")
             chat.write(RichMarkdown(line.text, code_theme="dracula"))
+        if line.speaker == "tool":
+            chat.write(f"[bold {_META}]tool[/bold {_META}]")
+            chat.write(line.text)
+        if line.speaker == "error":
+            chat.write(f"[bold {_ERROR}]error[/bold {_ERROR}]")
+            chat.write(line.text)
         chat.write("")
+
+    def on_agent_progress(self, message: AgentProgress) -> None:
+        self._write_message(
+            self.query_one("#chat", RichLog),
+            ChatLine("tool", format_progress_event(message.event)),
+        )
+
+    def _write_error(self, text: str) -> None:
+        chat = self.query_one("#chat", RichLog)
+        chat.write(f"[bold {_ERROR}]error[/bold {_ERROR}]")
+        chat.write(text)
+        chat.write("")
+
 
     def _set_busy(self, busy: bool) -> None:
         if busy:
@@ -225,3 +257,33 @@ class GearApp(App[None]):
                 f"[{_META}]{format_tokens(self._token_usage)}[/{_META}]",
             ]
         )
+
+
+class TextualAgentLoopEventSink:
+    """Publishes agent loop progress events into a Textual app."""
+
+    def __init__(self) -> None:
+        self._app: GearApp | None = None
+
+    def bind(self, app: GearApp) -> None:
+        """Binds the sink to a running app.
+
+        Args:
+            app: Gear Code Textual app.
+        """
+
+        self._app = app
+
+    def publish(self, event: AgentLoopEvent) -> None:
+        """Publishes an agent loop progress event to the app.
+
+        Args:
+            event: Agent loop event.
+
+        Raises:
+            RuntimeError: If the sink is used before being bound to an app.
+        """
+
+        if self._app is None:
+            raise RuntimeError("TextualAgentLoopEventSink must be bound before use.")
+        self._app.post_message(AgentProgress(event))

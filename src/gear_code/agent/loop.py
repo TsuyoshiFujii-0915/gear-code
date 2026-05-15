@@ -3,6 +3,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from gear_code.agent.events import (
+    AgentLoopEventSink,
+    ModelRequestStarted,
+    ToolUseFinished,
+    ToolUseStarted,
+)
 from gear_code.config import ModelConfig
 from gear_code.errors import GearError, gear_error
 from gear_code.model.client import ModelClient
@@ -49,11 +55,13 @@ class AgentLoop:
         config: ModelConfig,
         tools: list[Tool],
         store: ContextStore,
+        event_sink: AgentLoopEventSink,
     ) -> None:
         self._client = client
         self._config = config
         self._registry = ToolRegistry(tools)
         self._store = store
+        self._event_sink = event_sink
 
     def run_turn(
         self,
@@ -87,6 +95,9 @@ class AgentLoop:
         tools = self._registry.schemas()
 
         for iteration in range(1, max_iterations + 1):
+            self._event_sink.publish(
+                ModelRequestStarted(session_id=session_id, iteration=iteration)
+            )
             response = self._client.create_response(
                 self._config,
                 input_items,
@@ -108,9 +119,19 @@ class AgentLoop:
                     "tool_call",
                     {
                         "call_id": function_call.call_id,
+                        "iteration": iteration,
                         "name": function_call.name,
                         "arguments": function_call.arguments,
                     },
+                )
+                self._event_sink.publish(
+                    ToolUseStarted(
+                        session_id=session_id,
+                        iteration=iteration,
+                        call_id=function_call.call_id,
+                        name=function_call.name,
+                        arguments=function_call.arguments,
+                    )
                 )
                 try:
                     tool_result = self._registry.run(function_call.name, function_call.arguments)
@@ -123,9 +144,19 @@ class AgentLoop:
                     "tool_result",
                     {
                         "call_id": function_call.call_id,
+                        "iteration": iteration,
                         "name": function_call.name,
                         "result": tool_result,
                     },
+                )
+                self._event_sink.publish(
+                    ToolUseFinished(
+                        session_id=session_id,
+                        iteration=iteration,
+                        call_id=function_call.call_id,
+                        name=function_call.name,
+                        result=tool_result,
+                    )
                 )
                 input_items.append(function_call_output_item(function_call.call_id, tool_result))
 

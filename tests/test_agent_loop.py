@@ -1,6 +1,13 @@
 import unittest
 from typing import Any
 
+from gear_code.agent.events import (
+    AgentLoopEvent,
+    ModelRequestStarted,
+    SilentAgentLoopEventSink,
+    ToolUseFinished,
+    ToolUseStarted,
+)
 from gear_code.agent.loop import AgentLoop
 from gear_code.config import ModelConfig
 from gear_code.errors import GearError, gear_error
@@ -101,6 +108,14 @@ class UnrecoverableFailingTool(Tool):
         raise gear_error("fatal_tool_error", "Fatal tool error.", self.name, False, {})
 
 
+class RecordingEventSink:
+    def __init__(self) -> None:
+        self.events: list[AgentLoopEvent] = []
+
+    def publish(self, event: AgentLoopEvent) -> None:
+        self.events.append(event)
+
+
 class AgentLoopTests(unittest.TestCase):
     def test_runs_tool_call_and_returns_final_text(self) -> None:
         transport = SequencedTransport(
@@ -132,7 +147,8 @@ class AgentLoopTests(unittest.TestCase):
             api_key=None,
         )
         store = MemoryContextStore()
-        loop = AgentLoop(client, config, [EchoTool()], store)
+        event_sink = RecordingEventSink()
+        loop = AgentLoop(client, config, [EchoTool()], store, event_sink)
 
         result = loop.run_turn("session-1", "hello", 4, 30)
 
@@ -140,6 +156,27 @@ class AgentLoopTests(unittest.TestCase):
         self.assertEqual(len(transport.payloads), 2)
         self.assertIn("function_call_output", str(transport.payloads[1]["input"]))
         self.assertIn("Use workspace-relative paths", str(transport.payloads[0]["instructions"]))
+        self.assertEqual(
+            event_sink.events,
+            [
+                ModelRequestStarted(session_id="session-1", iteration=1),
+                ToolUseStarted(
+                    session_id="session-1",
+                    iteration=1,
+                    call_id="call_1",
+                    name="echo",
+                    arguments={"text": "ok"},
+                ),
+                ToolUseFinished(
+                    session_id="session-1",
+                    iteration=1,
+                    call_id="call_1",
+                    name="echo",
+                    result={"text": "ok"},
+                ),
+                ModelRequestStarted(session_id="session-1", iteration=2),
+            ],
+        )
 
     def test_recoverable_tool_error_is_returned_to_model(self) -> None:
         transport = SequencedTransport(
@@ -171,7 +208,8 @@ class AgentLoopTests(unittest.TestCase):
             api_key=None,
         )
         store = MemoryContextStore()
-        loop = AgentLoop(client, config, [RecoverableFailingTool()], store)
+        event_sink = RecordingEventSink()
+        loop = AgentLoop(client, config, [RecoverableFailingTool()], store, event_sink)
 
         result = loop.run_turn("session-1", "hello", 4, 30)
 
@@ -181,6 +219,38 @@ class AgentLoopTests(unittest.TestCase):
         self.assertIn("function_call_output", str(second_input))
         self.assertIn("path_outside_workspace", str(second_input))
         self.assertIn("/testbed", str(second_input))
+        self.assertEqual(len(event_sink.events), 4)
+        self.assertEqual(
+            event_sink.events[1],
+            ToolUseStarted(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="recoverable_fail",
+                arguments={},
+            ),
+        )
+        self.assertEqual(
+            event_sink.events[2],
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="recoverable_fail",
+                result={
+                    "error": {
+                        "type": "path_outside_workspace",
+                        "message": "Path is outside the workspace.",
+                        "origin": "recoverable_fail",
+                        "details": {"path": "/testbed"},
+                    }
+                },
+            ),
+        )
+        self.assertEqual(
+            event_sink.events[3],
+            ModelRequestStarted(session_id="session-1", iteration=2),
+        )
 
     def test_unrecoverable_tool_error_is_not_returned_to_model(self) -> None:
         transport = SequencedTransport(
@@ -204,7 +274,8 @@ class AgentLoopTests(unittest.TestCase):
             api_key=None,
         )
         store = MemoryContextStore()
-        loop = AgentLoop(client, config, [UnrecoverableFailingTool()], store)
+        event_sink = SilentAgentLoopEventSink()
+        loop = AgentLoop(client, config, [UnrecoverableFailingTool()], store, event_sink)
 
         with self.assertRaises(GearError):
             loop.run_turn("session-1", "hello", 4, 30)

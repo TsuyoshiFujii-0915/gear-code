@@ -22,7 +22,7 @@ from gear_code.model.transport import UrllibHttpTransport
 from gear_code.store.jsonl import JsonlContextStore
 from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.runtimes import DockerShellRuntime
-from gear_code.tui_app import GearApp
+from gear_code.tui_app import GearApp, TextualAgentLoopEventSink
 
 
 def main() -> None:
@@ -98,14 +98,16 @@ def _run_tui(args: Namespace, environment: Mapping[str, str]) -> None:
     shell_runtime = DockerShellRuntime(workspace, DEFAULT_DOCKER_IMAGE, runtime.network_enabled)
     tools = build_configured_tools(config.tool, workspace, shell_runtime)
     store = JsonlContextStore(runtime.session_dir)
+    event_sink = TextualAgentLoopEventSink()
     loop = AgentLoop(
         ModelClient(UrllibHttpTransport()),
         config.model,
         tools,
         store,
+        event_sink,
     )
     compaction = CompactionService(ModelClient(UrllibHttpTransport()))
-    GearApp(
+    app = GearApp(
         model=config.model.model,
         session_id=session_id,
         workspace=workspace,
@@ -114,7 +116,9 @@ def _run_tui(args: Namespace, environment: Mapping[str, str]) -> None:
         store=store,
         runtime=runtime,
         model_config=config.model,
-    ).run()
+    )
+    event_sink.bind(app)
+    app.run()
 
 
 def _run_init(args: Namespace, environment: Mapping[str, str]) -> None:
