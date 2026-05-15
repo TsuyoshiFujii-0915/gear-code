@@ -7,10 +7,14 @@ name = "gear-code"
 version = "0.1.0"
 description = "A minimal educational coding agent using Responses API-compatible endpoints."
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "textual>=8.2.6",
+]
 
 [dependency-groups]
-dev = []
+dev = [
+    "pytest>=9.0.3",
+]
 
 [project.scripts]
 gear = "gear_code.cli:main"

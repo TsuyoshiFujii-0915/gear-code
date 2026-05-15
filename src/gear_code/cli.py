@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from argparse import ArgumentParser, Namespace
-from typing import Any, Mapping
+from typing import Mapping
 from pathlib import Path
 from uuid import uuid4
 import os
@@ -22,6 +22,7 @@ from gear_code.model.transport import UrllibHttpTransport
 from gear_code.store.jsonl import JsonlContextStore
 from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.runtimes import DockerShellRuntime
+from gear_code.tui_app import GearApp
 
 
 def main() -> None:
@@ -104,53 +105,21 @@ def _run_tui(args: Namespace, environment: Mapping[str, str]) -> None:
         store,
     )
     compaction = CompactionService(ModelClient(UrllibHttpTransport()))
-
-    _print_header(config.model.model, config.model.url, session_id)
-    while True:
-        user_text = input("you> ")
-        if user_text.strip() in {"/quit", "/exit"}:
-            print("status> exiting")
-            return
-        if user_text.strip() == "/compact":
-            print("status> compacting")
-            summary = compaction.compact(
-                session_id,
-                store,
-                config.model,
-                runtime.model_timeout_seconds,
-            )
-            print(f"summary> {summary}")
-            continue
-        if user_text.strip() == "":
-            print("status> empty message ignored")
-            continue
-        print("status> running")
-        event_count = len(store.load(session_id))
-        try:
-            result = loop.run_turn(
-                session_id,
-                user_text,
-                runtime.max_iterations,
-                runtime.model_timeout_seconds,
-            )
-        except KeyboardInterrupt:
-            print("status> interrupted")
-            continue
-        _print_turn_events(store.load(session_id)[event_count:])
-        print(f"assistant> {result.final_text}")
+    GearApp(
+        model=config.model.model,
+        session_id=session_id,
+        workspace=workspace,
+        agent_loop=loop,
+        compaction=compaction,
+        store=store,
+        runtime=runtime,
+        model_config=config.model,
+    ).run()
 
 
 def _run_init(args: Namespace, environment: Mapping[str, str]) -> None:
     path = initialize_config(args.scope, Path.cwd(), _home_dir(environment))
     print(f"created> {path}")
-
-
-def _print_header(model: str, url: str, session_id: str) -> None:
-    print("Gear Code")
-    print(f"model> {model}")
-    print(f"url> {url}")
-    print(f"session> {session_id}")
-    print("commands> /compact /quit /exit")
 
 
 def _runtime_from_args(runtime: RuntimeConfig, args: Namespace) -> RuntimeConfig:
@@ -186,24 +155,6 @@ def _home_dir(environment: Mapping[str, str]) -> Path:
             {},
         )
     return Path(home)
-
-
-def _print_turn_events(events: list[dict[str, Any]]) -> None:
-    for event in events:
-        kind = event.get("kind")
-        payload = event.get("payload")
-        if kind == "tool_call" and isinstance(payload, dict):
-            print(f"tool> {payload.get('name')}")
-        if kind == "tool_result" and isinstance(payload, dict):
-            result = payload.get("result")
-            print(f"tool-result> {_summarize_result(result)}")
-
-
-def _summarize_result(result: object) -> str:
-    text = str(result)
-    if len(text) <= 240:
-        return text
-    return f"{text[:240]}..."
 
 
 if __name__ == "__main__":
