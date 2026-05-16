@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
+from rich.console import RenderableType
 from rich.markdown import Markdown as RichMarkdown
+from rich.padding import Padding
+from rich.table import Table
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -25,15 +30,37 @@ from gear_code.tui import (
     format_tokens,
 )
 
-_BG = "#0d0d11"
-_SURFACE = "#13131c"
-_BRAND = "#a78bfa"
-_USER = "#34d399"
-_ASST = "#7dd3fc"
-_META = "#4b5675"
-_RULE = "#1c1c28"
-_DIM = "#2d3657"
-_ERROR = "#f87171"
+# Engineering-grade theme — graphite base with machined-brass and steel accents.
+_BG = "#15171c"
+_LINE = "#2c313b"
+_TEXT = "#c7ccd6"
+_MUTED = "#6c7480"
+_BRASS = "#d6a052"
+_STEEL = "#7ba0c4"
+_TOOL = "#8b94a1"
+_ERR = "#cf7060"
+
+
+@dataclass(frozen=True)
+class _Role:
+    """Visual style for a chat speaker.
+
+    Attributes:
+        label: Speaker label shown beside the accent bar.
+        color: Accent colour for the bar and label.
+    """
+
+    label: str
+    color: str
+
+
+_ROLES: dict[str, _Role] = {
+    "you": _Role("you", _STEEL),
+    "assistant": _Role("gear", _BRASS),
+    "tool": _Role("tool", _TOOL),
+    "error": _Role("error", _ERR),
+}
+
 
 _CSS = f"""
 Screen {{
@@ -42,34 +69,32 @@ Screen {{
 }}
 
 #header {{
-    height: 1;
-    background: {_SURFACE};
-    padding: 0 2;
-}}
-
-#workdir {{
-    height: 1;
+    height: 4;
+    padding: 1 3;
     background: {_BG};
-    color: {_META};
-    padding: 0 4;
 }}
 
 Rule {{
+    height: 1;
+    margin: 0 3;
+    color: {_LINE};
     background: {_BG};
-    color: {_RULE};
 }}
 
 #chat {{
     height: 1fr;
+    padding: 1 3;
     background: {_BG};
-    padding: 0 2;
-    scrollbar-color: {_RULE};
-    scrollbar-color-hover: {_DIM};
+    scrollbar-size: 1 1;
+    scrollbar-color: {_LINE};
+    scrollbar-color-hover: {_BRASS};
     scrollbar-background: {_BG};
 }}
 
 #input-bar {{
     height: 1;
+    margin: 1 0;
+    padding: 0 3;
     background: {_BG};
     layout: horizontal;
 }}
@@ -77,8 +102,7 @@ Rule {{
 #prompt {{
     width: 4;
     background: {_BG};
-    color: {_USER};
-    padding: 0 2;
+    color: {_BRASS};
 }}
 
 Input {{
@@ -87,7 +111,7 @@ Input {{
     border: none;
     padding: 0;
     background: {_BG};
-    color: {_USER};
+    color: {_TEXT};
 }}
 
 Input:focus {{
@@ -138,14 +162,12 @@ class GearApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Static(self._build_header(), id="header")
-        yield Static(compact_path(self._workspace), id="workdir")
         yield Rule()
         yield RichLog(id="chat", markup=True, highlight=False, wrap=True, auto_scroll=True)
         yield Rule()
         with Horizontal(id="input-bar"):
-            yield Static("▸", id="prompt")
-            yield Input(id="input")
-        yield Rule()
+            yield Static("▌ ›", id="prompt")
+            yield Input(id="input", placeholder="enter a request")
 
     def on_mount(self) -> None:
         events = self._store.load(self._session_id)
@@ -208,22 +230,27 @@ class GearApp(App[None]):
     def _render_history(self, chat_lines: list[ChatLine]) -> None:
         chat = self.query_one("#chat", RichLog)
         chat.clear()
+        if not chat_lines:
+            chat.write(Text("▌ session ready — enter a request", style=f"italic {_MUTED}"))
+            chat.write("")
         for line in chat_lines:
             self._write_message(chat, line)
 
     def _write_message(self, chat: RichLog, line: ChatLine) -> None:
-        if line.speaker == "you":
-            chat.write(f"[bold {_USER}]you[/bold {_USER}]")
-            chat.write(line.text)
+        role = _ROLES.get(line.speaker)
+        if role is None:
+            raise ValueError(f"Unsupported chat speaker: {line.speaker}")
         if line.speaker == "assistant":
-            chat.write(f"[bold {_ASST}]assistant[/bold {_ASST}]")
-            chat.write(RichMarkdown(line.text, code_theme="dracula"))
-        if line.speaker == "tool":
-            chat.write(f"[bold {_META}]tool[/bold {_META}]")
-            chat.write(line.text)
-        if line.speaker == "error":
-            chat.write(f"[bold {_ERROR}]error[/bold {_ERROR}]")
-            chat.write(line.text)
+            body: RenderableType = RichMarkdown(line.text, code_theme="material")
+        else:
+            body = Text(line.text, style=_TEXT)
+        chat.write(
+            Text.assemble(
+                ("▌ ", role.color),
+                (role.label, f"bold {role.color}"),
+            )
+        )
+        chat.write(Padding(body, (0, 0, 0, 2)))
         chat.write("")
 
     def on_agent_progress(self, message: AgentProgress) -> None:
@@ -233,30 +260,33 @@ class GearApp(App[None]):
         )
 
     def _write_error(self, text: str) -> None:
-        chat = self.query_one("#chat", RichLog)
-        chat.write(f"[bold {_ERROR}]error[/bold {_ERROR}]")
-        chat.write(text)
-        chat.write("")
-
+        self._write_message(self.query_one("#chat", RichLog), ChatLine("error", text))
 
     def _set_busy(self, busy: bool) -> None:
         if busy:
-            self.query_one("#chat", RichLog).write(f"[{_DIM}]  ● thinking…[/{_DIM}]")
+            self.query_one("#chat", RichLog).write(
+                Text("▌ working…", style=f"italic {_BRASS}")
+            )
         inp = self.query_one(Input)
         inp.disabled = busy
         if not busy:
             inp.focus()
 
-    def _build_header(self) -> str:
-        sep = f"  [{_RULE}]│[/{_RULE}]  "
-        return sep.join(
+    def _build_header(self) -> Table:
+        grid = Table.grid(expand=True, padding=(0, 0))
+        grid.add_column(justify="left", ratio=1)
+        grid.add_column(justify="right", ratio=1)
+        sep = f"  [{_LINE}]│[/{_LINE}]  "
+        status = sep.join(
             [
-                f"[bold {_BRAND}]◈ GEAR CODE[/bold {_BRAND}]",
-                f"[{_META}]{self._model}[/{_META}]",
-                f"[{_META}]#{compact_session(self._session_id)}[/{_META}]",
-                f"[{_META}]{format_tokens(self._token_usage)}[/{_META}]",
+                f"[{_MUTED}]model[/{_MUTED}] [{_STEEL}]{self._model}[/{_STEEL}]",
+                f"[{_MUTED}]session[/{_MUTED}] {compact_session(self._session_id)}",
+                f"[{_MUTED}]tokens[/{_MUTED}] [{_BRASS}]{format_tokens(self._token_usage)}[/{_BRASS}]",
             ]
         )
+        grid.add_row(f"[bold {_BRASS}]⚙ GEAR CODE[/bold {_BRASS}]", status)
+        grid.add_row(f"[{_MUTED}]{compact_path(self._workspace)}[/{_MUTED}]", "")
+        return grid
 
 
 class TextualAgentLoopEventSink:
