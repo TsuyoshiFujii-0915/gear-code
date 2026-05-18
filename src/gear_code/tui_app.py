@@ -8,6 +8,7 @@ from rich.markdown import Markdown as RichMarkdown
 from rich.padding import Padding
 from rich.table import Table
 from rich.text import Text
+from rich.theme import Theme
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -40,6 +41,35 @@ _STEEL = "#7ba0c4"
 _TOOL = "#8b94a1"
 _ERR = "#cf7060"
 
+# Markdown accents — derived from the base theme so rendered Markdown stays on-palette.
+_HEAD_1 = "#e2b878"
+_STRONG = "#e6e9ef"
+_EMPH = "#9db4cc"
+_CODE = "#a8c08a"
+_CODE_BG = "#1d2027"
+
+# Overrides Rich's default Markdown styles, which otherwise inject high-saturation
+# colours unrelated to the graphite/brass/steel theme.
+_MARKDOWN_THEME = Theme(
+    {
+        "markdown.h1": f"bold {_HEAD_1}",
+        "markdown.h2": f"bold {_BRASS}",
+        "markdown.h3": f"bold {_STEEL}",
+        "markdown.h4": f"bold {_MUTED}",
+        "markdown.h5": f"bold {_MUTED}",
+        "markdown.h6": f"bold {_MUTED}",
+        "markdown.strong": f"bold {_STRONG}",
+        "markdown.em": f"italic {_EMPH}",
+        "markdown.code": f"{_CODE} on {_CODE_BG}",
+        "markdown.link": f"underline {_STEEL}",
+        "markdown.link_url": f"underline {_STEEL}",
+        "markdown.block_quote": f"italic {_MUTED}",
+        "markdown.item.bullet": f"bold {_BRASS}",
+        "markdown.item.number": f"bold {_BRASS}",
+        "markdown.hr": _LINE,
+    }
+)
+
 
 @dataclass(frozen=True)
 class _Role:
@@ -60,6 +90,28 @@ _ROLES: dict[str, _Role] = {
     "tool": _Role("tool", _TOOL),
     "error": _Role("error", _ERR),
 }
+
+
+def _render_tool_block(text: str) -> Text:
+    """Renders tool output as a muted, rail-prefixed log block.
+
+    Tool results are a secondary channel, so they carry no accent bar and are
+    dimmed below the brightness of user input and assistant output.
+
+    Args:
+        text: Tool output text, possibly spanning multiple lines.
+
+    Returns:
+        A dim Text with each line prefixed by a thin rail glyph.
+    """
+
+    block = Text()
+    for index, content in enumerate(text.split("\n")):
+        if index > 0:
+            block.append("\n")
+        block.append("┆ ", style=_LINE)
+        block.append(content, style=_MUTED)
+    return block
 
 
 _CSS = f"""
@@ -170,6 +222,7 @@ class GearApp(App[None]):
             yield Input(id="input", placeholder="enter a request")
 
     def on_mount(self) -> None:
+        self.console.push_theme(_MARKDOWN_THEME)
         events = self._store.load(self._session_id)
         self._token_usage = collect_token_usage(events)
         self._render_history(collect_chat_lines(events))
@@ -240,8 +293,12 @@ class GearApp(App[None]):
         role = _ROLES.get(line.speaker)
         if role is None:
             raise ValueError(f"Unsupported chat speaker: {line.speaker}")
+        if line.speaker == "tool":
+            chat.write(Padding(_render_tool_block(line.text), (0, 0, 0, 2)))
+            chat.write("")
+            return
         if line.speaker == "assistant":
-            body: RenderableType = RichMarkdown(line.text, code_theme="material")
+            body: RenderableType = RichMarkdown(line.text, code_theme="github-dark")
         else:
             body = Text(line.text, style=_TEXT)
         chat.write(

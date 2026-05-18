@@ -68,7 +68,7 @@ class CollectChatLinesTests(unittest.TestCase):
                 "kind": "tool_call",
                 "payload": {
                     "call_id": "call_1",
-                    "name": "read_file",
+                    "name": "file_read",
                     "arguments": {"path": "src/gear_code/agent/loop.py"},
                 },
             },
@@ -81,7 +81,7 @@ class CollectChatLinesTests(unittest.TestCase):
             [
                 ChatLine(
                     "tool",
-                    'loop ? start read_file\nargs {"path": "src/gear_code/agent/loop.py"}',
+                    "loop ? tool file_read started\npath src/gear_code/agent/loop.py",
                 )
             ],
         )
@@ -92,7 +92,7 @@ class CollectChatLinesTests(unittest.TestCase):
                 "kind": "tool_result",
                 "payload": {
                     "call_id": "call_1",
-                    "name": "read_file",
+                    "name": "file_read",
                     "result": {
                         "error": {
                             "type": "file_not_found",
@@ -113,12 +113,39 @@ class CollectChatLinesTests(unittest.TestCase):
                 ChatLine(
                     "tool",
                     (
-                        "loop ? finish read_file\n"
-                        'result {"error": {"details": {"path": "missing.py"}, '
-                        '"message": "File does not exist.", "origin": "file_read", '
-                        '"type": "file_not_found"}}'
+                        "loop ? tool file_read failed file_not_found\n"
+                        "message File does not exist.\n"
+                        "origin file_read\n"
+                        "returned_to_model yes\n"
+                        "detail path missing.py"
                     ),
                 )
+            ],
+        )
+
+    def test_maps_malformed_tool_result_to_tool_display_error(self) -> None:
+        events: list[dict[str, Any]] = [
+            {
+                "kind": "tool_result",
+                "payload": {
+                    "call_id": "call_1",
+                    "name": "shell",
+                    "result": {"exit_code": 0},
+                },
+            },
+            {"kind": "assistant_message", "payload": {"text": "done"}},
+        ]
+
+        lines = collect_chat_lines(events)
+
+        self.assertEqual(
+            lines,
+            [
+                ChatLine(
+                    "tool",
+                    "tool display error\nreason shell result.stdout must be a string.",
+                ),
+                ChatLine("assistant", "done"),
             ],
         )
 
@@ -131,11 +158,30 @@ class FormatProgressEventTests(unittest.TestCase):
                 iteration=2,
                 call_id="call_1",
                 name="shell",
-                arguments={"cmd": "pytest"},
+                arguments={"command": "pytest", "workdir": ".", "timeout_seconds": 30},
             )
         )
 
-        self.assertEqual(text, 'loop 2 start shell\nargs {"cmd": "pytest"}')
+        self.assertEqual(
+            text,
+            "loop 2 tool shell started\ncommand pytest\nworkdir .\ntimeout 30s",
+        )
+
+    def test_formats_unsupported_tool_start_explicitly(self) -> None:
+        text = format_progress_event(
+            ToolUseStarted(
+                session_id="session-1",
+                iteration=2,
+                call_id="call_1",
+                name="missing_tool",
+                arguments={"path": "x"},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            "loop 2 tool missing_tool started\narguments unsupported tool",
+        )
 
     def test_formats_model_request_started(self) -> None:
         text = format_progress_event(ModelRequestStarted(session_id="session-1", iteration=2))
@@ -149,11 +195,64 @@ class FormatProgressEventTests(unittest.TestCase):
                 iteration=2,
                 call_id="call_1",
                 name="shell",
-                result={"exit_code": 0},
+                result={"exit_code": 0, "stdout": "ok\n", "stderr": "", "timed_out": False},
             )
         )
 
-        self.assertEqual(text, 'loop 2 finish shell\nresult {"exit_code": 0}')
+        self.assertEqual(
+            text,
+            (
+                "loop 2 tool shell completed\n"
+                "exit 0\n"
+                "timed_out no\n"
+                "stdout ok\n"
+                "stderr empty"
+            ),
+        )
+
+    def test_formats_file_read_result_with_content_summary(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="file_read",
+                result={"path": "src/example.py", "content": "alpha\nbeta\n"},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "loop 1 tool file_read completed\n"
+                "path src/example.py\n"
+                "content 11 bytes, 2 lines\n"
+                "preview\n"
+                "  alpha\n"
+                "  beta"
+            ),
+        )
+
+    def test_formats_apply_patch_result_with_changed_files(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="apply_patch",
+                result={"changed_files": ["src/gear_code/tui.py", "tests/test_tui.py"]},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "loop 1 tool apply_patch completed\n"
+                "changed_files 2\n"
+                "  src/gear_code/tui.py\n"
+                "  tests/test_tui.py"
+            ),
+        )
 
     def test_truncates_large_tool_result_before_rendering(self) -> None:
         text = format_progress_event(
@@ -169,6 +268,22 @@ class FormatProgressEventTests(unittest.TestCase):
         self.assertIn("head", text)
         self.assertIn("[truncated]", text)
         self.assertNotIn("tail", text)
+
+    def test_formats_malformed_progress_event_as_display_error(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="shell",
+                result={"exit_code": 0},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            "tool display error\nreason shell result.stdout must be a string.",
+        )
 
 
 if __name__ == "__main__":
