@@ -183,6 +183,22 @@ class FormatProgressEventTests(unittest.TestCase):
             "loop 2 tool missing_tool started\narguments unsupported tool",
         )
 
+    def test_formats_web_search_started(self) -> None:
+        text = format_progress_event(
+            ToolUseStarted(
+                session_id="session-1",
+                iteration=2,
+                call_id="call_1",
+                name="web_search",
+                arguments={"query": "OpenAI Responses API"},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            "loop 2 tool web_search started\nquery OpenAI Responses API",
+        )
+
     def test_formats_model_request_started(self) -> None:
         text = format_progress_event(ModelRequestStarted(session_id="session-1", iteration=2))
 
@@ -251,6 +267,55 @@ class FormatProgressEventTests(unittest.TestCase):
                 "changed_files 2\n"
                 "  src/gear_code/tui.py\n"
                 "  tests/test_tui.py"
+            ),
+        )
+
+    def test_formats_web_search_result_with_results_summary(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="web_search",
+                result={
+                    "query": "OpenAI Responses API",
+                    "answer": "Use Responses for tool calls.",
+                    "results": [
+                        {
+                            "title": "Responses API",
+                            "url": "https://developers.openai.com/api/docs",
+                            "content": "Current API docs.",
+                            "score": 0.91,
+                            "raw_content": None,
+                        },
+                        {
+                            "title": "Function calling",
+                            "url": "https://developers.openai.com/api/docs/guides/function-calling",
+                            "content": "Use function tools.",
+                            "score": 0.84,
+                            "raw_content": None,
+                        },
+                    ],
+                    "credits": 1,
+                    "request_id": "req-123",
+                },
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "loop 1 tool web_search completed\n"
+                "query OpenAI Responses API\n"
+                "results 2\n"
+                "credits 1\n"
+                "answer Use Responses for tool calls.\n"
+                "  1. Responses API\n"
+                "     https://developers.openai.com/api/docs\n"
+                "     Current API docs.\n"
+                "  2. Function calling\n"
+                "     https://developers.openai.com/api/docs/guides/function-calling\n"
+                "     Use function tools."
             ),
         )
 

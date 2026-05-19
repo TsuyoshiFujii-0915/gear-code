@@ -96,7 +96,7 @@ def _run_tui(args: Namespace, environment: Mapping[str, str]) -> None:
     workspace = runtime.workdir.resolve()
     session_id = str(uuid4())
     shell_runtime = DockerShellRuntime(workspace, DEFAULT_DOCKER_IMAGE, runtime.network_enabled)
-    tools = build_configured_tools(config.tool, workspace, shell_runtime)
+    tools = build_configured_tools(config.tool, config.web_search, workspace, shell_runtime)
     store = JsonlContextStore(runtime.session_dir)
     event_sink = TextualAgentLoopEventSink()
     loop = AgentLoop(

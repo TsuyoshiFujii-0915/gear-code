@@ -20,6 +20,15 @@ shell_tool = true
 file_read = true
 file_write = true
 apply_patch = true
+web_search = false
+
+[web_search]
+api_key_env = "TAVILY_API_KEY"
+search_depth = "basic"
+max_results = 5
+timeout_seconds = 20
+include_answer = true
+include_raw_content = false
 
 [runtime]
 workdir = "."
@@ -54,12 +63,35 @@ class ToolConfig:
         file_read: Whether to expose the file read tool.
         file_write: Whether to expose the file write tool.
         apply_patch: Whether to expose the patch application tool.
+        web_search: Whether to expose the Tavily web search tool.
     """
 
     shell_tool: bool
     file_read: bool
     file_write: bool
     apply_patch: bool
+    web_search: bool
+
+
+@dataclass(frozen=True)
+class WebSearchConfig:
+    """Tavily web search configuration.
+
+    Attributes:
+        api_key: Tavily API key resolved from the configured environment variable.
+        search_depth: Tavily search depth.
+        max_results: Maximum Tavily search results to return.
+        timeout_seconds: Tavily request timeout in seconds.
+        include_answer: Whether Tavily should include a generated answer.
+        include_raw_content: Whether Tavily should include raw result content.
+    """
+
+    api_key: str
+    search_depth: str
+    max_results: int
+    timeout_seconds: int
+    include_answer: bool
+    include_raw_content: bool
 
 
 @dataclass(frozen=True)
@@ -89,11 +121,13 @@ class AppConfig:
         model: Model endpoint configuration.
         runtime: Runtime configuration.
         tool: Model-callable tool configuration.
+        web_search: Tavily web search configuration when enabled.
     """
 
     model: ModelConfig
     runtime: RuntimeConfig
     tool: ToolConfig
+    web_search: WebSearchConfig | None
 
 
 def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
@@ -150,15 +184,17 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
     _reject_unknown_keys(
         tool_table,
         "tool",
-        {"shell_tool", "file_read", "file_write", "apply_patch"},
+        {"shell_tool", "file_read", "file_write", "apply_patch", "web_search"},
     )
     tool = ToolConfig(
         shell_tool=_required_bool(tool_table, "shell_tool", "tool"),
         file_read=_required_bool(tool_table, "file_read", "tool"),
         file_write=_required_bool(tool_table, "file_write", "tool"),
         apply_patch=_required_bool(tool_table, "apply_patch", "tool"),
+        web_search=_required_bool(tool_table, "web_search", "tool"),
     )
-    return AppConfig(ModelConfig(url=url, model=model, api_key=api_key), runtime, tool)
+    web_search = _load_web_search_config(raw_data, tool.web_search, environment)
+    return AppConfig(ModelConfig(url=url, model=model, api_key=api_key), runtime, tool, web_search)
 
 
 def discover_config_path(start_dir: Path, home_dir: Path) -> Path:
@@ -331,6 +367,107 @@ def _required_network(data: dict[str, object]) -> bool:
         True,
         {"table": "runtime", "key": "network", "value": value},
     )
+
+
+def _load_web_search_config(
+    raw_data: dict[str, object],
+    enabled: bool,
+    environment: Mapping[str, str],
+) -> WebSearchConfig | None:
+    if not enabled:
+        return None
+    table = _required_table(raw_data, "web_search")
+    _reject_unknown_keys(
+        table,
+        "web_search",
+        {
+            "api_key_env",
+            "search_depth",
+            "max_results",
+            "timeout_seconds",
+            "include_answer",
+            "include_raw_content",
+        },
+    )
+    api_key_env = _required_string(table, "api_key_env", "web_search")
+    api_key = _required_secret(api_key_env, environment, "web_search.api_key_env")
+    return WebSearchConfig(
+        api_key=api_key,
+        search_depth=_required_web_search_depth(table),
+        max_results=_required_int_in_range(table, "max_results", "web_search", 1, 20),
+        timeout_seconds=_required_positive_int(table, "timeout_seconds", "web_search"),
+        include_answer=_required_bool(table, "include_answer", "web_search"),
+        include_raw_content=_required_bool(table, "include_raw_content", "web_search"),
+    )
+
+
+def _required_secret(
+    api_key_env: str,
+    environment: Mapping[str, str],
+    origin: str,
+) -> str:
+    if api_key_env == "":
+        raise gear_error(
+            "config_secret_env_invalid",
+            f"Environment variable name is required: {origin}",
+            "config",
+            True,
+            {"origin": origin},
+        )
+    value = environment.get(api_key_env)
+    if value is None or value == "":
+        raise gear_error(
+            "config_secret_missing",
+            f"Environment variable is required but not set: {api_key_env}",
+            "config",
+            True,
+            {"env": api_key_env, "origin": origin},
+        )
+    return value
+
+
+def _required_web_search_depth(data: dict[str, object]) -> str:
+    value = _required_string(data, "search_depth", "web_search")
+    expected_values = {"advanced", "basic", "fast", "ultra-fast"}
+    if value not in expected_values:
+        raise gear_error(
+            "config_value_invalid",
+            "Invalid value for web_search.search_depth.",
+            "config",
+            True,
+            {
+                "table": "web_search",
+                "key": "search_depth",
+                "value": value,
+                "expected": sorted(expected_values),
+            },
+        )
+    return value
+
+
+def _required_int_in_range(
+    data: dict[str, object],
+    key: str,
+    table_name: str,
+    minimum: int,
+    maximum: int,
+) -> int:
+    value = _required_positive_int(data, key, table_name)
+    if value < minimum or value > maximum:
+        raise gear_error(
+            "config_value_invalid",
+            f"Invalid integer range for {table_name}.{key}.",
+            "config",
+            True,
+            {
+                "table": table_name,
+                "key": key,
+                "value": value,
+                "minimum": minimum,
+                "maximum": maximum,
+            },
+        )
+    return value
 
 
 def _required_positive_int(data: dict[str, object], key: str, table_name: str) -> int:

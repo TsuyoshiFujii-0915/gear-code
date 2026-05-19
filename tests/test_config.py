@@ -31,6 +31,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "web_search = false",
                         "",
                     ]
                 ),
@@ -52,6 +53,8 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.tool.file_read)
             self.assertTrue(config.tool.file_write)
             self.assertTrue(config.tool.apply_patch)
+            self.assertFalse(config.tool.web_search)
+            self.assertIsNone(config.web_search)
 
     def test_omits_authorization_when_api_key_env_is_empty(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -76,6 +79,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "web_search = false",
                         "",
                     ]
                 ),
@@ -89,6 +93,183 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.tool.file_read)
             self.assertFalse(config.tool.file_write)
             self.assertTrue(config.tool.apply_patch)
+            self.assertFalse(config.tool.web_search)
+            self.assertIsNone(config.web_search)
+
+    def test_loads_enabled_tavily_web_search_config(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = true",
+                        "file_write = false",
+                        "apply_patch = true",
+                        "web_search = true",
+                        "",
+                        "[web_search]",
+                        'api_key_env = "TAVILY_API_KEY"',
+                        'search_depth = "basic"',
+                        "max_results = 5",
+                        "timeout_seconds = 20",
+                        "include_answer = true",
+                        "include_raw_content = false",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path, {"TAVILY_API_KEY": "tvly-secret"})
+
+            self.assertTrue(config.tool.web_search)
+            self.assertIsNotNone(config.web_search)
+            if config.web_search is None:
+                raise AssertionError("web_search config should be present.")
+            self.assertEqual(config.web_search.api_key, "tvly-secret")
+            self.assertEqual(config.web_search.search_depth, "basic")
+            self.assertEqual(config.web_search.max_results, 5)
+            self.assertEqual(config.web_search.timeout_seconds, 20)
+            self.assertTrue(config.web_search.include_answer)
+            self.assertFalse(config.web_search.include_raw_content)
+
+    def test_fails_when_web_search_enabled_without_config_table(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = true",
+                        "file_write = false",
+                        "apply_patch = true",
+                        "web_search = true",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, {})
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("[web_search]", error.exception.message)
+
+    def test_fails_when_web_search_api_key_environment_variable_is_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = true",
+                        "file_write = false",
+                        "apply_patch = true",
+                        "web_search = true",
+                        "",
+                        "[web_search]",
+                        'api_key_env = "TAVILY_API_KEY"',
+                        'search_depth = "basic"',
+                        "max_results = 5",
+                        "timeout_seconds = 20",
+                        "include_answer = false",
+                        "include_raw_content = false",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, {})
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("TAVILY_API_KEY", error.exception.message)
+
+    def test_fails_when_web_search_depth_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = true",
+                        "file_write = false",
+                        "apply_patch = true",
+                        "web_search = true",
+                        "",
+                        "[web_search]",
+                        'api_key_env = "TAVILY_API_KEY"',
+                        'search_depth = "slow"',
+                        "max_results = 5",
+                        "timeout_seconds = 20",
+                        "include_answer = false",
+                        "include_raw_content = false",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaises(GearError) as error:
+                load_config(config_path, {"TAVILY_API_KEY": "tvly-secret"})
+
+            self.assertEqual(error.exception.origin, "config")
+            self.assertIn("web_search.search_depth", error.exception.message)
 
     def test_fails_when_named_api_key_environment_variable_is_missing(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -113,6 +294,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "web_search = false",
                         "",
                     ]
                 ),
@@ -148,6 +330,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "web_search = false",
                         "",
                     ]
                 ),
@@ -212,6 +395,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "web_search = false",
                         "",
                     ]
                 ),
@@ -247,6 +431,7 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "web_search = false",
                         "browser = true",
                         "",
                     ]
@@ -308,7 +493,15 @@ class ConfigTests(unittest.TestCase):
             config_text = path.read_text(encoding="utf-8")
             self.assertIn("[model]", config_text)
             self.assertIn("[tool]", config_text)
+            self.assertIn("[web_search]", config_text)
+            self.assertIn('api_key_env = "TAVILY_API_KEY"', config_text)
+            self.assertIn('search_depth = "basic"', config_text)
+            self.assertIn("max_results = 5", config_text)
             self.assertLess(config_text.index("[tool]"), config_text.index("[runtime]"))
+            self.assertLess(config_text.index("[web_search]"), config_text.index("[runtime]"))
+            config = load_config(path, {})
+            self.assertFalse(config.tool.web_search)
+            self.assertIsNone(config.web_search)
 
     def test_initializes_user_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -320,6 +513,8 @@ class ConfigTests(unittest.TestCase):
             config_text = path.read_text(encoding="utf-8")
             self.assertIn("[runtime]", config_text)
             self.assertIn("shell_tool = true", config_text)
+            self.assertIn("[web_search]", config_text)
+            self.assertIn("include_raw_content = false", config_text)
             self.assertLess(config_text.index("[tool]"), config_text.index("[runtime]"))
 
     def test_initialize_fails_when_config_already_exists(self) -> None:

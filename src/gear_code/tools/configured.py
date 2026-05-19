@@ -2,16 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gear_code.config import ToolConfig
+from gear_code.config import ToolConfig, WebSearchConfig
+from gear_code.errors import gear_error
 from gear_code.tools.base import Tool
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
 from gear_code.tools.patch import ApplyPatchTool
 from gear_code.tools.runtimes import ShellRuntime
 from gear_code.tools.shell import ShellTool
+from gear_code.tools.web_search import UrllibTavilySearchTransport, WebSearchTool
 
 
 def build_configured_tools(
     config: ToolConfig,
+    web_search_config: WebSearchConfig | None,
     workspace: Path,
     shell_runtime: ShellRuntime,
 ) -> list[Tool]:
@@ -19,6 +22,7 @@ def build_configured_tools(
 
     Args:
         config: Parsed tool availability configuration.
+        web_search_config: Parsed Tavily configuration when web search is enabled.
         workspace: Workspace root for file and shell tools.
         shell_runtime: Runtime used by the shell tool when enabled.
 
@@ -35,4 +39,14 @@ def build_configured_tools(
         tools.append(FileWriteTool(workspace))
     if config.apply_patch:
         tools.append(ApplyPatchTool(workspace))
+    if config.web_search:
+        if web_search_config is None:
+            raise gear_error(
+                "tool_config_invalid",
+                "web_search tool is enabled but web search config is missing.",
+                "tool_config",
+                True,
+                {"tool": "web_search"},
+            )
+        tools.append(WebSearchTool(web_search_config, UrllibTavilySearchTransport()))
     return tools

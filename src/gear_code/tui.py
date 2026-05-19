@@ -262,6 +262,8 @@ def _format_tool_started(iteration: str, tool_name: str, arguments: dict[str, ob
         return _format_file_write_started(iteration, arguments)
     if tool_name == "apply_patch":
         return _format_apply_patch_started(iteration, arguments)
+    if tool_name == "web_search":
+        return _format_web_search_started(iteration, arguments)
     return _format_unsupported_tool_started(iteration, tool_name)
 
 
@@ -279,6 +281,8 @@ def _format_tool_finished(iteration: str, tool_name: str, result: dict[str, obje
         return _format_file_write_finished(iteration, result)
     if tool_name == "apply_patch":
         return _format_apply_patch_finished(iteration, result)
+    if tool_name == "web_search":
+        return _format_web_search_finished(iteration, result)
     raise ValueError(f"Unsupported tool for TUI display: {tool_name}")
 
 
@@ -375,6 +379,45 @@ def _format_apply_patch_finished(iteration: str, result: dict[str, object]) -> s
     return "\n".join(lines)
 
 
+def _format_web_search_started(iteration: str, arguments: dict[str, object]) -> str:
+    query = _required_string(arguments, "query", "web_search arguments")
+    return "\n".join([f"loop {iteration} tool web_search started", f"query {query}"])
+
+
+def _format_web_search_finished(iteration: str, result: dict[str, object]) -> str:
+    query = _required_string(result, "query", "web_search result")
+    search_results = _required_object_list(result, "results", "web_search result")
+    lines = [
+        f"loop {iteration} tool web_search completed",
+        f"query {query}",
+        f"results {len(search_results)}",
+        f"credits {_format_optional_int(result.get('credits'))}",
+    ]
+    answer = result.get("answer")
+    if answer is not None:
+        if not isinstance(answer, str):
+            raise ValueError("web_search result.answer must be a string when present.")
+        if answer != "":
+            lines.append(f"answer {_preview_line(answer)}")
+    if len(search_results) == 0:
+        lines.append("  none")
+    else:
+        lines.extend(_format_web_search_result_lines(search_results))
+    return "\n".join(lines)
+
+
+def _format_web_search_result_lines(results: list[dict[object, object]]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(results, start=1):
+        title = _required_string(item, "title", "web_search result item")
+        url = _required_string(item, "url", "web_search result item")
+        content = _required_string(item, "content", "web_search result item")
+        lines.append(f"  {index}. {_preview_line(title)}")
+        lines.append(f"     {_preview_line(url)}")
+        lines.append(f"     {_preview_line(content)}")
+    return lines
+
+
 def _format_unsupported_tool_started(iteration: str, tool_name: str) -> str:
     return "\n".join(
         [
@@ -444,6 +487,30 @@ def _required_string_list(payload: dict[object, object], key: str, origin: str) 
             raise ValueError(f"{origin}.{key} must contain only strings.")
         strings.append(item)
     return strings
+
+
+def _required_object_list(
+    payload: dict[object, object],
+    key: str,
+    origin: str,
+) -> list[dict[object, object]]:
+    value = payload.get(key)
+    if not isinstance(value, list):
+        raise ValueError(f"{origin}.{key} must be a list.")
+    objects: list[dict[object, object]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            raise ValueError(f"{origin}.{key} must contain only objects.")
+        objects.append(item)
+    return objects
+
+
+def _format_optional_int(value: object) -> str:
+    if value is None:
+        return "unavailable"
+    if not isinstance(value, int):
+        raise ValueError("web_search result.credits must be an integer when present.")
+    return str(value)
 
 
 def _format_yes_no(value: bool) -> str:
