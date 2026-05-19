@@ -282,6 +282,101 @@ class AgentLoopTests(unittest.TestCase):
 
         self.assertEqual(len(transport.payloads), 1)
 
+    def test_retries_once_when_model_returns_reasoning_without_final_text(self) -> None:
+        transport = SequencedTransport(
+            [
+                {
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "status": "completed",
+                            "summary": [],
+                            "content": [
+                                {
+                                    "type": "reasoning_text",
+                                    "text": "I have enough information to answer.",
+                                }
+                            ],
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "final answer"}],
+                        }
+                    ]
+                },
+            ]
+        )
+        client = ModelClient(transport)
+        config = ModelConfig(
+            url="http://localhost:1234/v1/responses",
+            model="local-model-id",
+            api_key=None,
+        )
+        store = MemoryContextStore()
+        event_sink = RecordingEventSink()
+        loop = AgentLoop(client, config, [], store, event_sink)
+
+        result = loop.run_turn("session-1", "hello", 4, 30)
+
+        self.assertEqual(result.final_text, "final answer")
+        self.assertEqual(result.iterations, 2)
+        self.assertEqual(len(transport.payloads), 2)
+        retry_input = transport.payloads[1]["input"]
+        self.assertIn("reasoning", str(retry_input))
+        self.assertIn("final answer as output_text", str(retry_input))
+        stored_events = store.load("session-1")
+        assistant_messages = [
+            event for event in stored_events if event.get("kind") == "assistant_message"
+        ]
+        self.assertEqual(len(assistant_messages), 1)
+        self.assertEqual(assistant_messages[0]["payload"], {"text": "final answer"})
+
+    def test_fails_when_finalization_retry_also_has_no_final_text(self) -> None:
+        transport = SequencedTransport(
+            [
+                {
+                    "output": [
+                        {
+                            "type": "reasoning",
+                            "status": "completed",
+                            "summary": [],
+                            "content": [
+                                {"type": "reasoning_text", "text": "I should answer."}
+                            ],
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "\n\n"}],
+                        }
+                    ]
+                },
+            ]
+        )
+        client = ModelClient(transport)
+        config = ModelConfig(
+            url="http://localhost:1234/v1/responses",
+            model="local-model-id",
+            api_key=None,
+        )
+        store = MemoryContextStore()
+        event_sink = RecordingEventSink()
+        loop = AgentLoop(client, config, [], store, event_sink)
+
+        with self.assertRaises(GearError) as error:
+            loop.run_turn("session-1", "hello", 4, 30)
+
+        self.assertEqual(error.exception.origin, "agent_loop")
+        self.assertEqual(error.exception.error_type, "final_text_missing")
+        self.assertEqual(len(transport.payloads), 2)
+
 
 if __name__ == "__main__":
     unittest.main()

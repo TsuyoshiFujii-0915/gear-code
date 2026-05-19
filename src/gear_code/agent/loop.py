@@ -32,6 +32,13 @@ AGENT_INSTRUCTIONS = "\n".join(
     ]
 )
 
+FINALIZATION_RETRY_INSTRUCTION = "\n".join(
+    [
+        "The previous response did not contain a user-facing final answer as output_text.",
+        "If no tool call is needed, return the final answer for the user as output_text now.",
+    ]
+)
+
 
 @dataclass(frozen=True)
 class TurnResult:
@@ -93,6 +100,7 @@ class AgentLoop:
         self._store.append(session_id, "user_input", {"text": user_text})
         input_items: list[object] = [{"role": "user", "content": user_text}]
         tools = self._registry.schemas()
+        finalization_retry_used = False
 
         for iteration in range(1, max_iterations + 1):
             self._event_sink.publish(
@@ -109,8 +117,26 @@ class AgentLoop:
             function_calls = extract_function_calls(response)
             if len(function_calls) == 0:
                 final_text = extract_output_text(response)
-                self._store.append(session_id, "assistant_message", {"text": final_text})
-                return TurnResult(final_text=final_text, iterations=iteration)
+                if _has_final_text(final_text):
+                    self._store.append(session_id, "assistant_message", {"text": final_text})
+                    return TurnResult(final_text=final_text, iterations=iteration)
+                if not finalization_retry_used and iteration < max_iterations:
+                    finalization_retry_used = True
+                    input_items.extend(_output_items(response))
+                    input_items.append(
+                        {
+                            "role": "user",
+                            "content": FINALIZATION_RETRY_INSTRUCTION,
+                        }
+                    )
+                    continue
+                raise gear_error(
+                    "final_text_missing",
+                    "Model returned neither a tool call nor a final output_text.",
+                    "agent_loop",
+                    True,
+                    {"iteration": iteration, "retry_used": finalization_retry_used},
+                )
 
             input_items.extend(_output_items(response))
             for function_call in function_calls:
@@ -180,6 +206,10 @@ def _output_items(response: dict[str, Any]) -> list[object]:
             {},
         )
     return output
+
+
+def _has_final_text(text: str) -> bool:
+    return text.strip() != ""
 
 
 def _recoverable_tool_error_result(error: GearError) -> dict[str, object]:
