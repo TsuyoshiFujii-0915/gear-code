@@ -55,10 +55,6 @@ Thumbs.db
 
 # Development documents
 docs/
-!docs/
-docs/*
-!docs/decisions/
-docs/decisions/*
 
 # Test outputs
 test_outputs/
