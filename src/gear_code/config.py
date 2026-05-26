@@ -20,6 +20,8 @@ shell_tool = true
 file_read = true
 file_write = true
 apply_patch = true
+glob = true
+grep = true
 web_search = false
 web_fetch = false
 
@@ -73,6 +75,8 @@ class ToolConfig:
         file_read: Whether to expose the file read tool.
         file_write: Whether to expose the file write tool.
         apply_patch: Whether to expose the patch application tool.
+        glob: Whether to expose the filesystem glob tool.
+        grep: Whether to expose the filesystem grep tool.
         web_search: Whether to expose the Tavily web search tool.
         web_fetch: Whether to expose the Tavily web fetch tool.
     """
@@ -81,6 +85,8 @@ class ToolConfig:
     file_read: bool
     file_write: bool
     apply_patch: bool
+    glob: bool
+    grep: bool
     web_search: bool
     web_fetch: bool
 
@@ -226,6 +232,8 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
             "file_read",
             "file_write",
             "apply_patch",
+            "glob",
+            "grep",
             "web_search",
             "web_fetch",
         },
@@ -235,6 +243,8 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
         file_read=_required_bool(tool_table, "file_read", "tool"),
         file_write=_required_bool(tool_table, "file_write", "tool"),
         apply_patch=_required_bool(tool_table, "apply_patch", "tool"),
+        glob=_required_bool(tool_table, "glob", "tool"),
+        grep=_required_bool(tool_table, "grep", "tool"),
         web_search=_required_bool(tool_table, "web_search", "tool"),
         web_fetch=_required_bool(tool_table, "web_fetch", "tool"),
     )

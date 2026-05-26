@@ -9,6 +9,7 @@ from gear_code.config import ToolConfig, WebFetchConfig, WebSearchConfig
 from gear_code.errors import GearError
 from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
+from gear_code.tools.filesystem_search import GlobTool, GrepTool
 from gear_code.tools.registry import ToolRegistry
 from gear_code.tools.runtimes import DockerShellRuntime, ShellRuntime
 from gear_code.tools.shell import ShellTool
@@ -59,6 +60,112 @@ class ToolTests(unittest.TestCase):
                 tool.run({"path": "missing/file.txt", "content": "hello"})
 
             self.assertEqual(error.exception.origin, "file_write")
+
+    def test_glob_returns_workspace_relative_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "src").mkdir()
+            (workspace / "src" / "main.py").write_text("print('ok')\n", encoding="utf-8")
+            (workspace / "README.md").write_text("# Test\n", encoding="utf-8")
+            tool = GlobTool(workspace)
+
+            result = tool.run({"pattern": "**/*.py", "max_results": 10})
+
+            self.assertEqual(
+                result,
+                {
+                    "pattern": "**/*.py",
+                    "matches": [{"path": "src/main.py", "type": "file"}],
+                    "truncated": False,
+                },
+            )
+
+    def test_glob_truncates_after_max_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "a.txt").write_text("a\n", encoding="utf-8")
+            (workspace / "b.txt").write_text("b\n", encoding="utf-8")
+            tool = GlobTool(workspace)
+
+            result = tool.run({"pattern": "*.txt", "max_results": 1})
+
+            self.assertEqual(result["matches"], [{"path": "a.txt", "type": "file"}])
+            self.assertIs(result["truncated"], True)
+
+    def test_glob_rejects_path_outside_workspace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            tool = GlobTool(workspace)
+
+            with self.assertRaises(GearError) as error:
+                tool.run({"pattern": "../*.txt", "max_results": 10})
+
+            self.assertEqual(error.exception.origin, "glob")
+
+    def test_grep_returns_workspace_relative_line_matches(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "src").mkdir()
+            (workspace / "src" / "main.py").write_text(
+                "def main():\n    return 'needle'\n",
+                encoding="utf-8",
+            )
+            (workspace / "README.md").write_text("needle\n", encoding="utf-8")
+            tool = GrepTool(workspace)
+
+            result = tool.run({"path": "src", "pattern": "needle", "max_results": 10})
+
+            self.assertEqual(
+                result,
+                {
+                    "path": "src",
+                    "pattern": "needle",
+                    "matches": [
+                        {
+                            "path": "src/main.py",
+                            "line": 2,
+                            "text": "    return 'needle'",
+                        }
+                    ],
+                    "truncated": False,
+                },
+            )
+
+    def test_grep_truncates_after_max_results(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "one.txt").write_text("needle\n", encoding="utf-8")
+            (workspace / "two.txt").write_text("needle\n", encoding="utf-8")
+            tool = GrepTool(workspace)
+
+            result = tool.run({"path": ".", "pattern": "needle", "max_results": 1})
+
+            self.assertEqual(
+                result["matches"],
+                [{"path": "one.txt", "line": 1, "text": "needle"}],
+            )
+            self.assertIs(result["truncated"], True)
+
+    def test_grep_rejects_invalid_regex(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            tool = GrepTool(Path(temp_dir))
+
+            with self.assertRaises(GearError) as error:
+                tool.run({"path": ".", "pattern": "[", "max_results": 10})
+
+            self.assertEqual(error.exception.origin, "grep")
+            self.assertIn("regex", error.exception.message)
+
+    def test_grep_rejects_non_utf8_file(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            workspace = Path(temp_dir)
+            (workspace / "binary.dat").write_bytes(b"\xff")
+            tool = GrepTool(workspace)
+
+            with self.assertRaises(GearError) as error:
+                tool.run({"path": "binary.dat", "pattern": "needle", "max_results": 10})
+
+            self.assertEqual(error.exception.origin, "grep")
 
     def test_shell_requires_timeout_seconds(self) -> None:
         runtime = FakeShellRuntime()
@@ -122,6 +229,8 @@ class ToolTests(unittest.TestCase):
             file_read=True,
             file_write=False,
             apply_patch=True,
+            glob=False,
+            grep=False,
             web_search=False,
             web_fetch=False,
         )
@@ -141,6 +250,8 @@ class ToolTests(unittest.TestCase):
             file_read=False,
             file_write=False,
             apply_patch=False,
+            glob=False,
+            grep=False,
             web_search=True,
             web_fetch=False,
         )
@@ -168,6 +279,8 @@ class ToolTests(unittest.TestCase):
             file_read=False,
             file_write=False,
             apply_patch=False,
+            glob=False,
+            grep=False,
             web_search=False,
             web_fetch=True,
         )
@@ -196,6 +309,8 @@ class ToolTests(unittest.TestCase):
             file_read=False,
             file_write=False,
             apply_patch=False,
+            glob=False,
+            grep=False,
             web_search=True,
             web_fetch=False,
         )
@@ -214,6 +329,8 @@ class ToolTests(unittest.TestCase):
             file_read=False,
             file_write=False,
             apply_patch=False,
+            glob=False,
+            grep=False,
             web_search=False,
             web_fetch=True,
         )
@@ -223,6 +340,27 @@ class ToolTests(unittest.TestCase):
 
         self.assertEqual(error.exception.origin, "tool_config")
         self.assertIn("web_fetch", error.exception.message)
+
+    def test_build_configured_tools_exposes_filesystem_search_tools_when_enabled(self) -> None:
+        runtime = FakeShellRuntime()
+        workspace = Path.cwd()
+        tool_config = ToolConfig(
+            shell_tool=False,
+            file_read=False,
+            file_write=False,
+            apply_patch=False,
+            glob=True,
+            grep=True,
+            web_search=False,
+            web_fetch=False,
+        )
+
+        registry = ToolRegistry(
+            build_configured_tools(tool_config, None, None, workspace, runtime)
+        )
+
+        schema_names = [schema["name"] for schema in registry.schemas()]
+        self.assertEqual(schema_names, ["glob", "grep"])
 
     def test_apply_patch_rejects_parent_directory_target(self) -> None:
         from gear_code.tools.patch import ApplyPatchTool

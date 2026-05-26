@@ -31,6 +31,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "",
@@ -54,6 +56,8 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.tool.file_read)
             self.assertTrue(config.tool.file_write)
             self.assertTrue(config.tool.apply_patch)
+            self.assertFalse(config.tool.glob)
+            self.assertFalse(config.tool.grep)
             self.assertFalse(config.tool.web_search)
             self.assertFalse(config.tool.web_fetch)
             self.assertIsNone(config.web_search)
@@ -82,6 +86,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "",
@@ -97,10 +103,52 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(config.tool.file_read)
             self.assertFalse(config.tool.file_write)
             self.assertTrue(config.tool.apply_patch)
+            self.assertFalse(config.tool.glob)
+            self.assertFalse(config.tool.grep)
             self.assertFalse(config.tool.web_search)
             self.assertFalse(config.tool.web_fetch)
             self.assertIsNone(config.web_search)
             self.assertIsNone(config.web_fetch)
+
+    def test_loads_enabled_filesystem_search_tools(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            config_path = Path(temp_dir) / "gear.toml"
+            config_path.write_text(
+                "\n".join(
+                    [
+                        "[model]",
+                        'url = "http://localhost:1234/v1/responses"',
+                        'model = "local-model-id"',
+                        'api_key_env = ""',
+                        "",
+                        "[runtime]",
+                        'workdir = "."',
+                        'session_dir = ".gear/sessions"',
+                        'network = "disabled"',
+                        "max_iterations = 8",
+                        "model_timeout_seconds = 120",
+                        "",
+                        "[tool]",
+                        "shell_tool = false",
+                        "file_read = false",
+                        "file_write = false",
+                        "apply_patch = false",
+                        "glob = true",
+                        "grep = true",
+                        "web_search = false",
+                        "web_fetch = false",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            config = load_config(config_path, os.environ)
+
+            self.assertTrue(config.tool.glob)
+            self.assertTrue(config.tool.grep)
+            self.assertFalse(config.tool.web_search)
+            self.assertFalse(config.tool.web_fetch)
 
     def test_loads_enabled_tavily_web_search_config(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -125,6 +173,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = true",
                         "web_fetch = false",
                         "",
@@ -178,6 +228,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = true",
                         "",
@@ -234,6 +286,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = true",
                         "web_fetch = false",
                         "",
@@ -271,6 +325,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = true",
                         "web_fetch = false",
                         "",
@@ -316,6 +372,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = true",
                         "web_fetch = false",
                         "",
@@ -361,6 +419,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = true",
                         "",
@@ -398,6 +458,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = true",
                         "",
@@ -444,6 +506,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = false",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = true",
                         "",
@@ -490,6 +554,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "",
@@ -527,6 +593,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "",
@@ -593,6 +661,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "",
@@ -630,6 +700,8 @@ class ConfigTests(unittest.TestCase):
                         "file_read = true",
                         "file_write = true",
                         "apply_patch = true",
+                        "glob = false",
+                        "grep = false",
                         "web_search = false",
                         "web_fetch = false",
                         "browser = true",
@@ -695,6 +767,8 @@ class ConfigTests(unittest.TestCase):
             self.assertIn("[tool]", config_text)
             self.assertIn("[web_search]", config_text)
             self.assertIn("[web_fetch]", config_text)
+            self.assertIn("glob = true", config_text)
+            self.assertIn("grep = true", config_text)
             self.assertIn('api_key_env = "TAVILY_API_KEY"', config_text)
             self.assertIn('search_depth = "basic"', config_text)
             self.assertIn('extract_depth = "basic"', config_text)
@@ -703,6 +777,8 @@ class ConfigTests(unittest.TestCase):
             self.assertLess(config_text.index("[web_search]"), config_text.index("[runtime]"))
             self.assertLess(config_text.index("[web_fetch]"), config_text.index("[runtime]"))
             config = load_config(path, {})
+            self.assertTrue(config.tool.glob)
+            self.assertTrue(config.tool.grep)
             self.assertFalse(config.tool.web_search)
             self.assertFalse(config.tool.web_fetch)
             self.assertIsNone(config.web_search)
@@ -718,6 +794,8 @@ class ConfigTests(unittest.TestCase):
             config_text = path.read_text(encoding="utf-8")
             self.assertIn("[runtime]", config_text)
             self.assertIn("shell_tool = true", config_text)
+            self.assertIn("glob = true", config_text)
+            self.assertIn("grep = true", config_text)
             self.assertIn("[web_search]", config_text)
             self.assertIn("[web_fetch]", config_text)
             self.assertIn("include_raw_content = false", config_text)

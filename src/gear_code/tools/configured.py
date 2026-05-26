@@ -6,6 +6,7 @@ from gear_code.config import ToolConfig, WebFetchConfig, WebSearchConfig
 from gear_code.errors import gear_error
 from gear_code.tools.base import Tool
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
+from gear_code.tools.filesystem_search import GlobTool, GrepTool
 from gear_code.tools.patch import ApplyPatchTool
 from gear_code.tools.runtimes import ShellRuntime
 from gear_code.tools.shell import ShellTool
@@ -42,6 +43,10 @@ def build_configured_tools(
         tools.append(FileWriteTool(workspace))
     if config.apply_patch:
         tools.append(ApplyPatchTool(workspace))
+    if config.glob:
+        tools.append(GlobTool(workspace))
+    if config.grep:
+        tools.append(GrepTool(workspace))
     if config.web_search:
         if web_search_config is None:
             raise gear_error(

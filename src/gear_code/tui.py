@@ -262,6 +262,10 @@ def _format_tool_started(iteration: str, tool_name: str, arguments: dict[str, ob
         return _format_file_write_started(iteration, arguments)
     if tool_name == "apply_patch":
         return _format_apply_patch_started(iteration, arguments)
+    if tool_name == "glob":
+        return _format_glob_started(iteration, arguments)
+    if tool_name == "grep":
+        return _format_grep_started(iteration, arguments)
     if tool_name == "web_search":
         return _format_web_search_started(iteration, arguments)
     return _format_unsupported_tool_started(iteration, tool_name)
@@ -281,6 +285,10 @@ def _format_tool_finished(iteration: str, tool_name: str, result: dict[str, obje
         return _format_file_write_finished(iteration, result)
     if tool_name == "apply_patch":
         return _format_apply_patch_finished(iteration, result)
+    if tool_name == "glob":
+        return _format_glob_finished(iteration, result)
+    if tool_name == "grep":
+        return _format_grep_finished(iteration, result)
     if tool_name == "web_search":
         return _format_web_search_finished(iteration, result)
     raise ValueError(f"Unsupported tool for TUI display: {tool_name}")
@@ -377,6 +385,87 @@ def _format_apply_patch_finished(iteration: str, result: dict[str, object]) -> s
     else:
         lines.extend([f"  {path}" for path in changed_files])
     return "\n".join(lines)
+
+
+def _format_glob_started(iteration: str, arguments: dict[str, object]) -> str:
+    pattern = _required_string(arguments, "pattern", "glob arguments")
+    max_results = _required_int(arguments, "max_results", "glob arguments")
+    return "\n".join(
+        [
+            f"loop {iteration} tool glob started",
+            f"pattern {pattern}",
+            f"max_results {max_results}",
+        ]
+    )
+
+
+def _format_glob_finished(iteration: str, result: dict[str, object]) -> str:
+    pattern = _required_string(result, "pattern", "glob result")
+    matches = _required_object_list(result, "matches", "glob result")
+    truncated = _required_bool(result, "truncated", "glob result")
+    lines = [
+        f"loop {iteration} tool glob completed",
+        f"pattern {pattern}",
+        f"matches {len(matches)}",
+        f"truncated {_format_yes_no(truncated)}",
+    ]
+    if len(matches) == 0:
+        lines.append("  none")
+    else:
+        lines.extend(_format_glob_match_lines(matches))
+    return "\n".join(lines)
+
+
+def _format_glob_match_lines(matches: list[dict[object, object]]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(matches, start=1):
+        path = _required_string(item, "path", "glob result item")
+        path_type = _required_string(item, "type", "glob result item")
+        lines.append(f"  {index}. {path_type} {_preview_line(path)}")
+    return lines
+
+
+def _format_grep_started(iteration: str, arguments: dict[str, object]) -> str:
+    path = _required_string(arguments, "path", "grep arguments")
+    pattern = _required_string(arguments, "pattern", "grep arguments")
+    max_results = _required_int(arguments, "max_results", "grep arguments")
+    return "\n".join(
+        [
+            f"loop {iteration} tool grep started",
+            f"path {path}",
+            f"pattern {pattern}",
+            f"max_results {max_results}",
+        ]
+    )
+
+
+def _format_grep_finished(iteration: str, result: dict[str, object]) -> str:
+    path = _required_string(result, "path", "grep result")
+    pattern = _required_string(result, "pattern", "grep result")
+    matches = _required_object_list(result, "matches", "grep result")
+    truncated = _required_bool(result, "truncated", "grep result")
+    lines = [
+        f"loop {iteration} tool grep completed",
+        f"path {path}",
+        f"pattern {pattern}",
+        f"matches {len(matches)}",
+        f"truncated {_format_yes_no(truncated)}",
+    ]
+    if len(matches) == 0:
+        lines.append("  none")
+    else:
+        lines.extend(_format_grep_match_lines(matches))
+    return "\n".join(lines)
+
+
+def _format_grep_match_lines(matches: list[dict[object, object]]) -> list[str]:
+    lines: list[str] = []
+    for index, item in enumerate(matches, start=1):
+        path = _required_string(item, "path", "grep result item")
+        line_number = _required_int(item, "line", "grep result item")
+        text = _required_string(item, "text", "grep result item")
+        lines.append(f"  {index}. {path}:{line_number} {_preview_line(text)}")
+    return lines
 
 
 def _format_web_search_started(iteration: str, arguments: dict[str, object]) -> str:

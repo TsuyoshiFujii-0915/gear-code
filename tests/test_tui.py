@@ -199,6 +199,38 @@ class FormatProgressEventTests(unittest.TestCase):
             "loop 2 tool web_search started\nquery OpenAI Responses API",
         )
 
+    def test_formats_glob_started(self) -> None:
+        text = format_progress_event(
+            ToolUseStarted(
+                session_id="session-1",
+                iteration=2,
+                call_id="call_1",
+                name="glob",
+                arguments={"pattern": "**/*.py", "max_results": 20},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            "loop 2 tool glob started\npattern **/*.py\nmax_results 20",
+        )
+
+    def test_formats_grep_started(self) -> None:
+        text = format_progress_event(
+            ToolUseStarted(
+                session_id="session-1",
+                iteration=2,
+                call_id="call_1",
+                name="grep",
+                arguments={"path": "src", "pattern": "needle", "max_results": 20},
+            )
+        )
+
+        self.assertEqual(
+            text,
+            "loop 2 tool grep started\npath src\npattern needle\nmax_results 20",
+        )
+
     def test_formats_model_request_started(self) -> None:
         text = format_progress_event(ModelRequestStarted(session_id="session-1", iteration=2))
 
@@ -316,6 +348,70 @@ class FormatProgressEventTests(unittest.TestCase):
                 "  2. Function calling\n"
                 "     https://developers.openai.com/api/docs/guides/function-calling\n"
                 "     Use function tools."
+            ),
+        )
+
+    def test_formats_glob_result_with_match_summary(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="glob",
+                result={
+                    "pattern": "**/*.py",
+                    "matches": [
+                        {"path": "src/gear_code/config.py", "type": "file"},
+                        {"path": "src/gear_code/tools", "type": "directory"},
+                    ],
+                    "truncated": True,
+                },
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "loop 1 tool glob completed\n"
+                "pattern **/*.py\n"
+                "matches 2\n"
+                "truncated yes\n"
+                "  1. file src/gear_code/config.py\n"
+                "  2. directory src/gear_code/tools"
+            ),
+        )
+
+    def test_formats_grep_result_with_line_summary(self) -> None:
+        text = format_progress_event(
+            ToolUseFinished(
+                session_id="session-1",
+                iteration=1,
+                call_id="call_1",
+                name="grep",
+                result={
+                    "path": "src",
+                    "pattern": "needle",
+                    "matches": [
+                        {
+                            "path": "src/gear_code/example.py",
+                            "line": 12,
+                            "text": "return 'needle'",
+                        }
+                    ],
+                    "truncated": False,
+                },
+            )
+        )
+
+        self.assertEqual(
+            text,
+            (
+                "loop 1 tool grep completed\n"
+                "path src\n"
+                "pattern needle\n"
+                "matches 1\n"
+                "truncated no\n"
+                "  1. src/gear_code/example.py:12 return 'needle'"
             ),
         )
 
