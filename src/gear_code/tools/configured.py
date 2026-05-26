@@ -2,19 +2,21 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from gear_code.config import ToolConfig, WebSearchConfig
+from gear_code.config import ToolConfig, WebFetchConfig, WebSearchConfig
 from gear_code.errors import gear_error
 from gear_code.tools.base import Tool
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
 from gear_code.tools.patch import ApplyPatchTool
 from gear_code.tools.runtimes import ShellRuntime
 from gear_code.tools.shell import ShellTool
+from gear_code.tools.web_fetch import UrllibTavilyFetchTransport, WebFetchTool
 from gear_code.tools.web_search import UrllibTavilySearchTransport, WebSearchTool
 
 
 def build_configured_tools(
     config: ToolConfig,
     web_search_config: WebSearchConfig | None,
+    web_fetch_config: WebFetchConfig | None,
     workspace: Path,
     shell_runtime: ShellRuntime,
 ) -> list[Tool]:
@@ -23,6 +25,7 @@ def build_configured_tools(
     Args:
         config: Parsed tool availability configuration.
         web_search_config: Parsed Tavily configuration when web search is enabled.
+        web_fetch_config: Parsed Tavily configuration when web fetch is enabled.
         workspace: Workspace root for file and shell tools.
         shell_runtime: Runtime used by the shell tool when enabled.
 
@@ -49,4 +52,14 @@ def build_configured_tools(
                 {"tool": "web_search"},
             )
         tools.append(WebSearchTool(web_search_config, UrllibTavilySearchTransport()))
+    if config.web_fetch:
+        if web_fetch_config is None:
+            raise gear_error(
+                "tool_config_invalid",
+                "web_fetch tool is enabled but web fetch config is missing.",
+                "tool_config",
+                True,
+                {"tool": "web_fetch"},
+            )
+        tools.append(WebFetchTool(web_fetch_config, UrllibTavilyFetchTransport()))
     return tools

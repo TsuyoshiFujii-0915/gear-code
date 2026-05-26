@@ -21,6 +21,7 @@ file_read = true
 file_write = true
 apply_patch = true
 web_search = false
+web_fetch = false
 
 [web_search]
 api_key_env = "TAVILY_API_KEY"
@@ -29,6 +30,15 @@ max_results = 5
 timeout_seconds = 20
 include_answer = true
 include_raw_content = false
+
+[web_fetch]
+api_key_env = "TAVILY_API_KEY"
+extract_depth = "basic"
+content_format = "markdown"
+timeout_seconds = 20
+include_images = false
+include_favicon = true
+max_content_chars = 20000
 
 [runtime]
 workdir = "."
@@ -64,6 +74,7 @@ class ToolConfig:
         file_write: Whether to expose the file write tool.
         apply_patch: Whether to expose the patch application tool.
         web_search: Whether to expose the Tavily web search tool.
+        web_fetch: Whether to expose the Tavily web fetch tool.
     """
 
     shell_tool: bool
@@ -71,6 +82,7 @@ class ToolConfig:
     file_write: bool
     apply_patch: bool
     web_search: bool
+    web_fetch: bool
 
 
 @dataclass(frozen=True)
@@ -92,6 +104,29 @@ class WebSearchConfig:
     timeout_seconds: int
     include_answer: bool
     include_raw_content: bool
+
+
+@dataclass(frozen=True)
+class WebFetchConfig:
+    """Tavily web fetch configuration.
+
+    Attributes:
+        api_key: Tavily API key resolved from the configured environment variable.
+        extract_depth: Tavily extraction depth.
+        content_format: Extracted content format.
+        timeout_seconds: Tavily request timeout in seconds.
+        include_images: Whether Tavily should include page image URLs.
+        include_favicon: Whether Tavily should include the page favicon URL.
+        max_content_chars: Maximum content length accepted from Tavily.
+    """
+
+    api_key: str
+    extract_depth: str
+    content_format: str
+    timeout_seconds: int
+    include_images: bool
+    include_favicon: bool
+    max_content_chars: int
 
 
 @dataclass(frozen=True)
@@ -122,12 +157,14 @@ class AppConfig:
         runtime: Runtime configuration.
         tool: Model-callable tool configuration.
         web_search: Tavily web search configuration when enabled.
+        web_fetch: Tavily web fetch configuration when enabled.
     """
 
     model: ModelConfig
     runtime: RuntimeConfig
     tool: ToolConfig
     web_search: WebSearchConfig | None
+    web_fetch: WebFetchConfig | None
 
 
 def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
@@ -184,7 +221,14 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
     _reject_unknown_keys(
         tool_table,
         "tool",
-        {"shell_tool", "file_read", "file_write", "apply_patch", "web_search"},
+        {
+            "shell_tool",
+            "file_read",
+            "file_write",
+            "apply_patch",
+            "web_search",
+            "web_fetch",
+        },
     )
     tool = ToolConfig(
         shell_tool=_required_bool(tool_table, "shell_tool", "tool"),
@@ -192,9 +236,17 @@ def load_config(path: Path, environment: Mapping[str, str]) -> AppConfig:
         file_write=_required_bool(tool_table, "file_write", "tool"),
         apply_patch=_required_bool(tool_table, "apply_patch", "tool"),
         web_search=_required_bool(tool_table, "web_search", "tool"),
+        web_fetch=_required_bool(tool_table, "web_fetch", "tool"),
     )
     web_search = _load_web_search_config(raw_data, tool.web_search, environment)
-    return AppConfig(ModelConfig(url=url, model=model, api_key=api_key), runtime, tool, web_search)
+    web_fetch = _load_web_fetch_config(raw_data, tool.web_fetch, environment)
+    return AppConfig(
+        ModelConfig(url=url, model=model, api_key=api_key),
+        runtime,
+        tool,
+        web_search,
+        web_fetch,
+    )
 
 
 def discover_config_path(start_dir: Path, home_dir: Path) -> Path:
@@ -401,6 +453,40 @@ def _load_web_search_config(
     )
 
 
+def _load_web_fetch_config(
+    raw_data: dict[str, object],
+    enabled: bool,
+    environment: Mapping[str, str],
+) -> WebFetchConfig | None:
+    if not enabled:
+        return None
+    table = _required_table(raw_data, "web_fetch")
+    _reject_unknown_keys(
+        table,
+        "web_fetch",
+        {
+            "api_key_env",
+            "extract_depth",
+            "content_format",
+            "timeout_seconds",
+            "include_images",
+            "include_favicon",
+            "max_content_chars",
+        },
+    )
+    api_key_env = _required_string(table, "api_key_env", "web_fetch")
+    api_key = _required_secret(api_key_env, environment, "web_fetch.api_key_env")
+    return WebFetchConfig(
+        api_key=api_key,
+        extract_depth=_required_web_fetch_depth(table),
+        content_format=_required_web_fetch_content_format(table),
+        timeout_seconds=_required_positive_int(table, "timeout_seconds", "web_fetch"),
+        include_images=_required_bool(table, "include_images", "web_fetch"),
+        include_favicon=_required_bool(table, "include_favicon", "web_fetch"),
+        max_content_chars=_required_positive_int(table, "max_content_chars", "web_fetch"),
+    )
+
+
 def _required_secret(
     api_key_env: str,
     environment: Mapping[str, str],
@@ -438,6 +524,44 @@ def _required_web_search_depth(data: dict[str, object]) -> str:
             {
                 "table": "web_search",
                 "key": "search_depth",
+                "value": value,
+                "expected": sorted(expected_values),
+            },
+        )
+    return value
+
+
+def _required_web_fetch_depth(data: dict[str, object]) -> str:
+    value = _required_string(data, "extract_depth", "web_fetch")
+    expected_values = {"advanced", "basic"}
+    if value not in expected_values:
+        raise gear_error(
+            "config_value_invalid",
+            "Invalid value for web_fetch.extract_depth.",
+            "config",
+            True,
+            {
+                "table": "web_fetch",
+                "key": "extract_depth",
+                "value": value,
+                "expected": sorted(expected_values),
+            },
+        )
+    return value
+
+
+def _required_web_fetch_content_format(data: dict[str, object]) -> str:
+    value = _required_string(data, "content_format", "web_fetch")
+    expected_values = {"markdown", "text"}
+    if value not in expected_values:
+        raise gear_error(
+            "config_value_invalid",
+            "Invalid value for web_fetch.content_format.",
+            "config",
+            True,
+            {
+                "table": "web_fetch",
+                "key": "content_format",
                 "value": value,
                 "expected": sorted(expected_values),
             },

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from gear_code.config import ToolConfig, WebSearchConfig
+from gear_code.config import ToolConfig, WebFetchConfig, WebSearchConfig
 from gear_code.errors import GearError
 from gear_code.tools.configured import build_configured_tools
 from gear_code.tools.filesystem import FileReadTool, FileWriteTool
@@ -123,10 +123,11 @@ class ToolTests(unittest.TestCase):
             file_write=False,
             apply_patch=True,
             web_search=False,
+            web_fetch=False,
         )
 
         registry = ToolRegistry(
-            build_configured_tools(tool_config, None, workspace, runtime)
+            build_configured_tools(tool_config, None, None, workspace, runtime)
         )
 
         schema_names = [schema["name"] for schema in registry.schemas()]
@@ -141,6 +142,7 @@ class ToolTests(unittest.TestCase):
             file_write=False,
             apply_patch=False,
             web_search=True,
+            web_fetch=False,
         )
         web_search_config = WebSearchConfig(
             api_key="tvly-secret",
@@ -152,11 +154,39 @@ class ToolTests(unittest.TestCase):
         )
 
         registry = ToolRegistry(
-            build_configured_tools(tool_config, web_search_config, workspace, runtime)
+            build_configured_tools(tool_config, web_search_config, None, workspace, runtime)
         )
 
         schema_names = [schema["name"] for schema in registry.schemas()]
         self.assertEqual(schema_names, ["web_search"])
+
+    def test_build_configured_tools_exposes_web_fetch_when_enabled(self) -> None:
+        runtime = FakeShellRuntime()
+        workspace = Path.cwd()
+        tool_config = ToolConfig(
+            shell_tool=False,
+            file_read=False,
+            file_write=False,
+            apply_patch=False,
+            web_search=False,
+            web_fetch=True,
+        )
+        web_fetch_config = WebFetchConfig(
+            api_key="tvly-secret",
+            extract_depth="basic",
+            content_format="markdown",
+            timeout_seconds=20,
+            include_images=False,
+            include_favicon=True,
+            max_content_chars=20_000,
+        )
+
+        registry = ToolRegistry(
+            build_configured_tools(tool_config, None, web_fetch_config, workspace, runtime)
+        )
+
+        schema_names = [schema["name"] for schema in registry.schemas()]
+        self.assertEqual(schema_names, ["web_fetch"])
 
     def test_build_configured_tools_requires_web_search_config_when_enabled(self) -> None:
         runtime = FakeShellRuntime()
@@ -167,13 +197,32 @@ class ToolTests(unittest.TestCase):
             file_write=False,
             apply_patch=False,
             web_search=True,
+            web_fetch=False,
         )
 
         with self.assertRaises(GearError) as error:
-            build_configured_tools(tool_config, None, workspace, runtime)
+            build_configured_tools(tool_config, None, None, workspace, runtime)
 
         self.assertEqual(error.exception.origin, "tool_config")
         self.assertIn("web_search", error.exception.message)
+
+    def test_build_configured_tools_requires_web_fetch_config_when_enabled(self) -> None:
+        runtime = FakeShellRuntime()
+        workspace = Path.cwd()
+        tool_config = ToolConfig(
+            shell_tool=False,
+            file_read=False,
+            file_write=False,
+            apply_patch=False,
+            web_search=False,
+            web_fetch=True,
+        )
+
+        with self.assertRaises(GearError) as error:
+            build_configured_tools(tool_config, None, None, workspace, runtime)
+
+        self.assertEqual(error.exception.origin, "tool_config")
+        self.assertIn("web_fetch", error.exception.message)
 
     def test_apply_patch_rejects_parent_directory_target(self) -> None:
         from gear_code.tools.patch import ApplyPatchTool

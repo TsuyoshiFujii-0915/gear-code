@@ -7,6 +7,8 @@ from gear_code.tools.patch import ApplyPatchTool
 from gear_code.tools.registry import ToolRegistry
 from gear_code.tools.runtimes import DockerShellRuntime, ShellRuntime
 from gear_code.tools.shell import ShellTool
+from gear_code.tools.web_fetch import WebFetchTool
+from gear_code.tools.web_search import WebSearchTool
 
 __all__ = [
     "ApplyPatchTool",
@@ -17,5 +19,7 @@ __all__ = [
     "ShellTool",
     "Tool",
     "ToolRegistry",
+    "WebFetchTool",
+    "WebSearchTool",
     "build_configured_tools",
 ]
