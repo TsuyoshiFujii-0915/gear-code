@@ -8,6 +8,7 @@ from gear_code.agent.events import (
     ToolUseFinished,
     ToolUseStarted,
 )
+from gear_code.agent.history import FUNCTION_CALL_OUTPUT_HISTORY_MAX_CHARS
 from gear_code.agent.loop import AgentLoop
 from gear_code.config import ModelConfig
 from gear_code.errors import GearError, gear_error
@@ -54,6 +55,29 @@ class EchoTool(Tool):
 
     def run(self, arguments: dict[str, object]) -> dict[str, object]:
         return {"text": arguments["text"]}
+
+
+class LargeOutputTool(Tool):
+    @property
+    def name(self) -> str:
+        return "large_output"
+
+    def schema(self) -> dict[str, object]:
+        return {
+            "type": "function",
+            "name": "large_output",
+            "description": "Return large text.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+                "additionalProperties": False,
+            },
+            "strict": True,
+        }
+
+    def run(self, arguments: dict[str, object]) -> dict[str, object]:
+        return {"text": "x" * (FUNCTION_CALL_OUTPUT_HISTORY_MAX_CHARS + 20)}
 
 
 class RecoverableFailingTool(Tool):
@@ -177,6 +201,124 @@ class AgentLoopTests(unittest.TestCase):
                 ModelRequestStarted(session_id="session-1", iteration=2),
             ],
         )
+
+    def test_includes_previous_turn_history_in_next_model_request(self) -> None:
+        transport = SequencedTransport(
+            [
+                {
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_1",
+                            "name": "echo",
+                            "arguments": '{"text": "ok"}',
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "done"}],
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "continued"}],
+                        }
+                    ]
+                },
+            ]
+        )
+        client = ModelClient(transport)
+        config = ModelConfig(
+            url="http://localhost:1234/v1/responses",
+            model="local-model-id",
+            api_key=None,
+        )
+        store = MemoryContextStore()
+        event_sink = SilentAgentLoopEventSink()
+        loop = AgentLoop(client, config, [EchoTool()], store, event_sink)
+
+        loop.run_turn("session-1", "hello", 4, 30)
+        result = loop.run_turn("session-1", "continue", 4, 30)
+
+        self.assertEqual(result.final_text, "continued")
+        self.assertEqual(len(transport.payloads), 3)
+        next_turn_input = transport.payloads[2]["input"]
+        self.assertEqual(
+            next_turn_input,
+            [
+                {"role": "user", "content": "hello"},
+                {
+                    "type": "function_call",
+                    "call_id": "call_1",
+                    "name": "echo",
+                    "arguments": '{"text": "ok"}',
+                },
+                {
+                    "type": "function_call_output",
+                    "call_id": "call_1",
+                    "output": '{"text": "ok"}',
+                },
+                {"role": "assistant", "content": "done"},
+                {"role": "user", "content": "continue"},
+            ],
+        )
+
+    def test_truncates_stored_function_call_output_only_on_later_turns(self) -> None:
+        transport = SequencedTransport(
+            [
+                {
+                    "output": [
+                        {
+                            "type": "function_call",
+                            "call_id": "call_large",
+                            "name": "large_output",
+                            "arguments": "{}",
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "large done"}],
+                        }
+                    ]
+                },
+                {
+                    "output": [
+                        {
+                            "type": "message",
+                            "content": [{"type": "output_text", "text": "after large"}],
+                        }
+                    ]
+                },
+            ]
+        )
+        client = ModelClient(transport)
+        config = ModelConfig(
+            url="http://localhost:1234/v1/responses",
+            model="local-model-id",
+            api_key=None,
+        )
+        store = MemoryContextStore()
+        event_sink = SilentAgentLoopEventSink()
+        loop = AgentLoop(client, config, [LargeOutputTool()], store, event_sink)
+
+        loop.run_turn("session-1", "produce large output", 4, 30)
+        loop.run_turn("session-1", "continue", 4, 30)
+
+        current_turn_output = transport.payloads[1]["input"][2]["output"]
+        self.assertIn("x" * (FUNCTION_CALL_OUTPUT_HISTORY_MAX_CHARS + 20), current_turn_output)
+        next_turn_output = transport.payloads[2]["input"][2]["output"]
+        self.assertIn('"truncated": true', next_turn_output)
+        self.assertIn('"original_json_chars"', next_turn_output)
+        self.assertNotIn("x" * (FUNCTION_CALL_OUTPUT_HISTORY_MAX_CHARS + 20), next_turn_output)
 
     def test_recoverable_tool_error_is_returned_to_model(self) -> None:
         transport = SequencedTransport(

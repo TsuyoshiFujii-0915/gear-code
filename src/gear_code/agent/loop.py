@@ -9,6 +9,7 @@ from gear_code.agent.events import (
     ToolUseFinished,
     ToolUseStarted,
 )
+from gear_code.agent.history import build_model_input
 from gear_code.config import ModelConfig
 from gear_code.errors import GearError, gear_error
 from gear_code.model.client import ModelClient
@@ -97,8 +98,8 @@ class AgentLoop:
                 True,
                 {"max_iterations": max_iterations},
             )
+        input_items = build_model_input(self._store.load(session_id), user_text)
         self._store.append(session_id, "user_input", {"text": user_text})
-        input_items: list[object] = [{"role": "user", "content": user_text}]
         tools = self._registry.schemas()
         finalization_retry_used = False
 
